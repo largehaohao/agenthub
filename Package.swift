@@ -64,7 +64,12 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentHubDaemonTests",
-            dependencies: ["AgentHubDaemon", "AgentHubTestSupport"]
+            dependencies: [
+                "AgentHubDaemon",
+                "AgentHubCore",
+                "AgentHubPersistence",
+                "AgentHubTestSupport",
+            ]
         ),
     ]
 )
