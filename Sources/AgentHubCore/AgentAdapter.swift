@@ -18,3 +18,12 @@ public protocol AgentAdapter: Sendable {
     ) async throws
     func jumpTarget(for session: ProviderSessionRef) async -> JumpTarget
 }
+
+public protocol EndpointConfigurableAdapter: AgentAdapter {
+    func restoreEndpoint(_ endpoint: ProviderEndpoint) async throws
+    func attachEndpoint(_ attachment: ProviderEndpointAttachment) async throws -> ProviderEndpoint
+    func authenticateEndpoint(
+        _ binding: ProviderEndpointCredentialBinding
+    ) async throws -> ProviderEndpoint
+    func detachEndpoint(id: String) async throws
+}

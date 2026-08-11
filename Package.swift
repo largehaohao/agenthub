@@ -9,6 +9,8 @@ let package = Package(
         .library(name: "AgentHubPersistence", targets: ["AgentHubPersistence"]),
         .library(name: "AgentHubIPC", targets: ["AgentHubIPC"]),
         .library(name: "AgentHubCodex", targets: ["AgentHubCodex"]),
+        .library(name: "AgentHubSecurity", targets: ["AgentHubSecurity"]),
+        .library(name: "AgentHubOpenCode", targets: ["AgentHubOpenCode"]),
         .library(name: "AgentHubDaemon", targets: ["AgentHubDaemon"]),
         .library(name: "AgentHubTestSupport", targets: ["AgentHubTestSupport"]),
         .executable(name: "agenthubd", targets: ["agenthubd"]),
@@ -36,12 +38,23 @@ let package = Package(
         ),
         .target(name: "AgentHubCodex", dependencies: ["AgentHubCore"]),
         .target(
+            name: "AgentHubSecurity",
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
+            name: "AgentHubOpenCode",
+            dependencies: ["AgentHubCore", "AgentHubSecurity"],
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
             name: "AgentHubDaemon",
             dependencies: [
                 "AgentHubCore",
                 "AgentHubPersistence",
                 "AgentHubIPC",
                 "AgentHubCodex",
+                "AgentHubSecurity",
+                "AgentHubOpenCode",
             ]
         ),
         .target(name: "AgentHubTestSupport", dependencies: ["AgentHubCore"]),
@@ -52,6 +65,8 @@ let package = Package(
                 "AgentHubPersistence",
                 "AgentHubIPC",
                 "AgentHubCodex",
+                "AgentHubSecurity",
+                "AgentHubOpenCode",
                 "AgentHubDaemon",
             ]
         ),

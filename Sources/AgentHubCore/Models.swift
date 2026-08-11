@@ -45,6 +45,75 @@ public enum SessionOwnership: String, Codable, Sendable {
     case discovered
 }
 
+public enum ProviderEndpointOrigin: String, Codable, Sendable {
+    case managed
+    case desktop
+    case tui
+    case manual
+}
+
+public struct ProviderEndpoint: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let provider: Provider
+    public let origin: ProviderEndpointOrigin
+    public let baseURL: String
+    public let credentialReference: String?
+    public var connected: Bool
+    public var version: String?
+    public var message: String?
+    public var lastSeenAt: Date
+
+    public init(
+        id: String,
+        provider: Provider,
+        origin: ProviderEndpointOrigin,
+        baseURL: String,
+        credentialReference: String? = nil,
+        connected: Bool,
+        version: String? = nil,
+        message: String? = nil,
+        lastSeenAt: Date
+    ) {
+        self.id = id
+        self.provider = provider
+        self.origin = origin
+        self.baseURL = baseURL
+        self.credentialReference = credentialReference
+        self.connected = connected
+        self.version = version
+        self.message = message
+        self.lastSeenAt = lastSeenAt
+    }
+}
+
+public struct ProviderEndpointAttachment: Codable, Equatable, Sendable {
+    public let provider: Provider
+    public let baseURL: String
+    public let credentialReference: String?
+
+    public init(
+        provider: Provider,
+        baseURL: String,
+        credentialReference: String? = nil
+    ) {
+        self.provider = provider
+        self.baseURL = baseURL
+        self.credentialReference = credentialReference
+    }
+}
+
+public struct ProviderEndpointCredentialBinding: Codable, Equatable, Sendable {
+    public let provider: Provider
+    public let endpointID: String
+    public let credentialReference: String
+
+    public init(provider: Provider, endpointID: String, credentialReference: String) {
+        self.provider = provider
+        self.endpointID = endpointID
+        self.credentialReference = credentialReference
+    }
+}
+
 public enum RequestKind: String, Codable, Sendable {
     case permission
     case planApproval
@@ -59,6 +128,28 @@ public enum RequestState: String, Codable, Sendable {
     case resolving
     case resolved
     case expired
+}
+
+public struct RequestField: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let prompt: String
+    public let choices: [String]
+    public let allowsMultiple: Bool
+    public let allowsFreeText: Bool
+
+    public init(
+        id: String,
+        prompt: String,
+        choices: [String] = [],
+        allowsMultiple: Bool = false,
+        allowsFreeText: Bool = false
+    ) {
+        self.id = id
+        self.prompt = prompt
+        self.choices = choices
+        self.allowsMultiple = allowsMultiple
+        self.allowsFreeText = allowsFreeText
+    }
 }
 
 public enum DeliveryState: String, Codable, Sendable {
@@ -184,6 +275,7 @@ public struct PendingRequest: Codable, Equatable, Identifiable, Sendable {
     public var title: String
     public var detail: String
     public var allowedActions: [String]
+    public var fields: [RequestField]
     public var state: RequestState
     public var reliability: ReliabilityLevel
     public var createdAt: Date
@@ -201,6 +293,7 @@ public struct PendingRequest: Codable, Equatable, Identifiable, Sendable {
         title: String,
         detail: String,
         allowedActions: [String],
+        fields: [RequestField] = [],
         state: RequestState,
         reliability: ReliabilityLevel,
         createdAt: Date,
@@ -217,10 +310,37 @@ public struct PendingRequest: Codable, Equatable, Identifiable, Sendable {
         self.title = title
         self.detail = detail
         self.allowedActions = allowedActions
+        self.fields = fields
         self.state = state
         self.reliability = reliability
         self.createdAt = createdAt
         self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, provider, providerRequestID, sessionID, threadID, turnID, itemID
+        case kind, title, detail, allowedActions, fields, state, reliability
+        case createdAt, expiresAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        provider = try container.decode(Provider.self, forKey: .provider)
+        providerRequestID = try container.decode(String.self, forKey: .providerRequestID)
+        sessionID = try container.decode(UUID.self, forKey: .sessionID)
+        threadID = try container.decode(String.self, forKey: .threadID)
+        turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+        itemID = try container.decodeIfPresent(String.self, forKey: .itemID)
+        kind = try container.decode(RequestKind.self, forKey: .kind)
+        title = try container.decode(String.self, forKey: .title)
+        detail = try container.decode(String.self, forKey: .detail)
+        allowedActions = try container.decode([String].self, forKey: .allowedActions)
+        fields = try container.decodeIfPresent([RequestField].self, forKey: .fields) ?? []
+        state = try container.decode(RequestState.self, forKey: .state)
+        reliability = try container.decode(ReliabilityLevel.self, forKey: .reliability)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
     }
 }
 
@@ -324,15 +444,37 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct LaunchModelSelection: Codable, Equatable, Sendable {
+    public let providerID: String
+    public let modelID: String
+    public let variant: String?
+
+    public init(providerID: String, modelID: String, variant: String? = nil) {
+        self.providerID = providerID
+        self.modelID = modelID
+        self.variant = variant
+    }
+}
+
 public struct LaunchRequest: Codable, Equatable, Sendable {
     public let clientRequestID: String
     public let cwd: String
     public let prompt: String
+    public let agent: String?
+    public let model: LaunchModelSelection?
 
-    public init(clientRequestID: String, cwd: String, prompt: String) {
+    public init(
+        clientRequestID: String,
+        cwd: String,
+        prompt: String,
+        agent: String? = nil,
+        model: LaunchModelSelection? = nil
+    ) {
         self.clientRequestID = clientRequestID
         self.cwd = cwd
         self.prompt = prompt
+        self.agent = agent
+        self.model = model
     }
 }
 
@@ -341,17 +483,23 @@ public struct AdapterSnapshot: Codable, Equatable, Sendable {
     public var nodes: [AgentNode]
     public var requests: [PendingRequest]
     public var quotas: [QuotaWindow]
+    public var endpoints: [ProviderEndpoint]
+    public var requestsAreAuthoritative: Bool
 
     public init(
         sessions: [AgentSession],
         nodes: [AgentNode],
         requests: [PendingRequest],
-        quotas: [QuotaWindow]
+        quotas: [QuotaWindow],
+        endpoints: [ProviderEndpoint] = [],
+        requestsAreAuthoritative: Bool = false
     ) {
         self.sessions = sessions
         self.nodes = nodes
         self.requests = requests
         self.quotas = quotas
+        self.endpoints = endpoints
+        self.requestsAreAuthoritative = requestsAreAuthoritative
     }
 }
 

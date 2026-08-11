@@ -7,6 +7,7 @@ public struct AgentHubState: Equatable, Codable, Sendable {
     public var envelopes: [UUID: MessageEnvelope]
     public var quotas: [String: QuotaWindow]
     public var adapterHealth: [Provider: AdapterHealth]
+    public var endpoints: [String: ProviderEndpoint]
 
     public init(
         sessions: [UUID: AgentSession] = [:],
@@ -14,7 +15,8 @@ public struct AgentHubState: Equatable, Codable, Sendable {
         requests: [UUID: PendingRequest] = [:],
         envelopes: [UUID: MessageEnvelope] = [:],
         quotas: [String: QuotaWindow] = [:],
-        adapterHealth: [Provider: AdapterHealth] = [:]
+        adapterHealth: [Provider: AdapterHealth] = [:],
+        endpoints: [String: ProviderEndpoint] = [:]
     ) {
         self.sessions = sessions
         self.nodes = nodes
@@ -22,6 +24,7 @@ public struct AgentHubState: Equatable, Codable, Sendable {
         self.envelopes = envelopes
         self.quotas = quotas
         self.adapterHealth = adapterHealth
+        self.endpoints = endpoints
     }
 
     public static let empty = AgentHubState()
