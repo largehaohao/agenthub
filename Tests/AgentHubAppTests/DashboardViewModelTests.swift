@@ -36,22 +36,48 @@ final class DashboardViewModelTests: XCTestCase {
 
         XCTAssertEqual(model.selectedSessionID, fixture.session.id)
     }
+
+    func testInitialConnectionFailureRetriesUntilDaemonIsAvailable() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(snapshot: fixture.state, connectFailures: 1)
+        let model = DashboardViewModel(
+            client: client,
+            retryDelay: { _ in .milliseconds(1) }
+        )
+
+        await model.connect()
+
+        XCTAssertEqual(model.connection, ConnectionState.connected)
+        let connectAttempts = await client.connectAttempts
+        XCTAssertEqual(connectAttempts, 2)
+        XCTAssertEqual(model.state.sessions.count, 1)
+    }
 }
 
 private actor FakeDaemonClient: DaemonClientProtocol {
     private let snapshot: AgentHubState
     private let jump: JumpTarget
     private(set) var recordedCommands: [DaemonCommand] = []
+    private(set) var connectAttempts = 0
+    private var remainingConnectFailures: Int
 
     init(
         snapshot: AgentHubState,
-        jump: JumpTarget = .unavailable("fixture")
+        jump: JumpTarget = .unavailable("fixture"),
+        connectFailures: Int = 0
     ) {
         self.snapshot = snapshot
         self.jump = jump
+        remainingConnectFailures = connectFailures
     }
 
-    func connect() async throws {}
+    func connect() async throws {
+        connectAttempts += 1
+        if remainingConnectFailures > 0 {
+            remainingConnectFailures -= 1
+            throw IPCError.disconnected
+        }
+    }
 
     func send(_ command: DaemonCommand) async throws -> DaemonReply {
         recordedCommands.append(command)

@@ -11,32 +11,50 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var message: String?
 
     private let client: any DaemonClientProtocol
+    private let retryDelay: @Sendable (Int) -> Duration
     private var resolvingRequestIDs: Set<UUID> = []
     private var eventTask: Task<Void, Never>?
 
-    init(client: any DaemonClientProtocol) {
+    init(
+        client: any DaemonClientProtocol,
+        retryDelay: @escaping @Sendable (Int) -> Duration = { attempt in
+            let delays = ReconnectSchedule.delays
+            return .seconds(delays[min(attempt, delays.count - 1)])
+        }
+    ) {
         self.client = client
+        self.retryDelay = retryDelay
     }
 
     func connect() async {
-        connection = .connecting
-        do {
-            try await client.connect()
-            connection = .connected
-            try await refresh()
-            let events = await client.events()
-            eventTask?.cancel()
-            eventTask = Task { [weak self] in
-                for await event in events {
-                    guard !Task.isCancelled else { return }
-                    switch event {
-                    case .stateChanged, .adapterHealth:
-                        try? await self?.refresh()
+        var attempt = 0
+        while !Task.isCancelled {
+            connection = .connecting
+            do {
+                try await client.connect()
+                connection = .connected
+                try await refresh()
+                let events = await client.events()
+                eventTask?.cancel()
+                eventTask = Task { [weak self] in
+                    for await event in events {
+                        guard !Task.isCancelled else { return }
+                        switch event {
+                        case .stateChanged, .adapterHealth:
+                            try? await self?.refresh()
+                        }
                     }
                 }
+                return
+            } catch {
+                connection = .disconnected("AgentHub daemon unavailable")
+                do {
+                    try await Task.sleep(for: retryDelay(attempt))
+                } catch {
+                    return
+                }
+                attempt += 1
             }
-        } catch {
-            connection = .disconnected("AgentHub daemon unavailable")
         }
     }
 
