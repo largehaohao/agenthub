@@ -8,10 +8,19 @@ actor TestAdapter: AgentAdapter {
     private(set) var resolvedRequests: [(ProviderRequestRef, RequestDecision)] = []
     var resolveError: Error?
     var sendError: Error?
+    private(set) var launchRequests: [LaunchRequest] = []
+    var launchDelay: Duration?
+    var snapshotToReturn: AdapterSnapshot = .fixture()
 
     func capabilities() async -> [Capability: ReliabilityLevel] { [:] }
-    func launch(_ request: LaunchRequest) async throws -> ProviderSessionRef { .fixture() }
-    func reconcile() async throws -> AdapterSnapshot { .fixture() }
+    func launch(_ request: LaunchRequest) async throws -> ProviderSessionRef {
+        launchRequests.append(request)
+        if let launchDelay {
+            try await Task.sleep(for: launchDelay)
+        }
+        return snapshotToReturn.sessions.first?.providerRef ?? .fixture()
+    }
+    func reconcile() async throws -> AdapterSnapshot { snapshotToReturn }
     func eventStream() async -> AsyncStream<AgentEvent> { AsyncStream { $0.finish() } }
     func recentTurns(for session: ProviderSessionRef, limit: Int) async throws -> [VisibleTurn] { [] }
 
@@ -31,5 +40,13 @@ actor TestAdapter: AgentAdapter {
 
     func setSendError(_ error: Error?) {
         sendError = error
+    }
+
+    func setSnapshot(_ snapshot: AdapterSnapshot) {
+        snapshotToReturn = snapshot
+    }
+
+    func setLaunchDelay(_ delay: Duration?) {
+        launchDelay = delay
     }
 }

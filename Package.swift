@@ -45,7 +45,16 @@ let package = Package(
             ]
         ),
         .target(name: "AgentHubTestSupport", dependencies: ["AgentHubCore"]),
-        .executableTarget(name: "agenthubd", dependencies: ["AgentHubDaemon"]),
+        .executableTarget(
+            name: "agenthubd",
+            dependencies: [
+                "AgentHubCore",
+                "AgentHubPersistence",
+                "AgentHubIPC",
+                "AgentHubCodex",
+                "AgentHubDaemon",
+            ]
+        ),
         .testTarget(
             name: "AgentHubCoreTests",
             dependencies: ["AgentHubCore", "AgentHubTestSupport"]
@@ -67,6 +76,7 @@ let package = Package(
             dependencies: [
                 "AgentHubDaemon",
                 "AgentHubCore",
+                "AgentHubIPC",
                 "AgentHubPersistence",
                 "AgentHubTestSupport",
             ]
