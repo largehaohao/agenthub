@@ -75,6 +75,10 @@ let package = Package(
             dependencies: ["AgentHubCore", "AgentHubTestSupport"]
         ),
         .testTarget(
+            name: "AgentHubSecurityTests",
+            dependencies: ["AgentHubSecurity"]
+        ),
+        .testTarget(
             name: "AgentHubPersistenceTests",
             dependencies: ["AgentHubPersistence", "AgentHubTestSupport"]
         ),
