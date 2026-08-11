@@ -1,6 +1,6 @@
 # AgentHub Hybrid OpenCode Integration Design
 
-**Status:** Approved interactively; pending written-spec review
+**Status:** Approved
 **Date:** 2026-08-11
 **Target:** Plan 2 of the AgentHub delivery roadmap
 **Validated against:** OpenCode 1.18.10 on macOS
