@@ -109,6 +109,30 @@ final class CodexRPCClientTests: XCTestCase {
         }
     }
 
+    func testTimedOutCallFailsWithoutTerminatingClient() async throws {
+        let transport = ScriptedLineTransport()
+        let client = CodexRPCClient(transport: transport)
+
+        do {
+            _ = try await client.call(
+                method: "account/rateLimits/read",
+                params: nil,
+                timeout: .milliseconds(20)
+            )
+            XCTFail("call did not time out")
+        } catch {
+            XCTAssertEqual(error as? CodexRPCError, .timedOut)
+        }
+
+        let next = Task { try await client.call(method: "thread/list", params: nil) }
+        await transport.waitForSentCount(2)
+        let nextID = try await transport.sentMessage(at: 1).requiredID
+        await transport.receive(response(id: nextID, result: .object(["data": .array([])])))
+
+        let result = try await next.value
+        XCTAssertEqual(result["data"], .array([]))
+    }
+
     func testDiagnosticsRedactCredentials() {
         let input = #"Authorization: Bearer secret-token sk-live123 {"api_key":"private"}"#
         let redacted = CodexProcess.redact(input)

@@ -12,6 +12,7 @@ public actor CodexRPCClient {
     private let messageStream: AsyncStream<JSONRPCMessage>
     private let messageContinuation: AsyncStream<JSONRPCMessage>.Continuation
     private var pending: [JSONRPCID: CheckedContinuation<JSONValue, Error>] = [:]
+    private var timeoutTasks: [JSONRPCID: Task<Void, Never>] = [:]
     private var nextID: Int64 = 1
     private var readTask: Task<Void, Never>?
     private var terminalError: CodexRPCError?
@@ -48,7 +49,11 @@ public actor CodexRPCClient {
         }
     }
 
-    public func call(method: String, params: JSONValue?) async throws -> JSONValue {
+    public func call(
+        method: String,
+        params: JSONValue?,
+        timeout: Duration? = nil
+    ) async throws -> JSONValue {
         if let terminalError { throw terminalError }
         ensureReader()
         let id = JSONRPCID.integer(nextID)
@@ -58,6 +63,16 @@ public actor CodexRPCClient {
 
         return try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
+            if let timeout {
+                timeoutTasks[id] = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    await self?.fail(id: id, error: CodexRPCError.timedOut)
+                }
+            }
             Task { [transport] in
                 do {
                     try await transport.send(line: encoded)
@@ -115,6 +130,7 @@ public actor CodexRPCClient {
         }
 
         if let id = message.id, message.method == nil {
+            timeoutTasks.removeValue(forKey: id)?.cancel()
             guard let continuation = pending.removeValue(forKey: id) else { return true }
             if let error = message.error {
                 continuation.resume(
@@ -132,6 +148,7 @@ public actor CodexRPCClient {
     }
 
     private func fail(id: JSONRPCID, error: Error) {
+        timeoutTasks.removeValue(forKey: id)?.cancel()
         pending.removeValue(forKey: id)?.resume(throwing: error)
     }
 
@@ -141,6 +158,8 @@ public actor CodexRPCClient {
         terminalError = normalized
         let continuations = pending.values
         pending.removeAll()
+        for task in timeoutTasks.values { task.cancel() }
+        timeoutTasks.removeAll()
         for continuation in continuations {
             continuation.resume(throwing: normalized)
         }

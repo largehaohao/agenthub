@@ -4,6 +4,12 @@ import AgentHubCore
 @testable import AgentHubCodex
 
 final class CodexAdapterTests: XCTestCase {
+    func testNotLoadedThreadIsRecentRatherThanDisconnected() {
+        let status = CodexThread.mapStatus(.object(["type": .string("notLoaded")]))
+
+        XCTAssertEqual(status, .completed)
+    }
+
     func testWaitingApprovalMapsToNormalizedStatus() async throws {
         let adapter = try makeAdapter(threadFixture: "thread-status")
         let snapshot = try await adapter.reconcile()
@@ -34,6 +40,22 @@ final class CodexAdapterTests: XCTestCase {
         XCTAssertEqual(windows.count, 2)
         XCTAssertTrue(windows.allSatisfy { $0.source == "codex-app-server" })
         XCTAssertEqual(windows.map(\.usedPercent).sorted(), [25, 40])
+    }
+
+    func testReconcileIncludesAvailableQuotaWindows() async throws {
+        let transport = MethodResponseTransport(responses: [
+            "thread/list": try fixture(named: "thread-status"),
+            "account/rateLimits/read": try fixture(named: "rate-limits"),
+        ])
+        let adapter = CodexAdapter(
+            accountID: "personal",
+            rpc: CodexRPCClient(transport: transport),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let snapshot = try await adapter.reconcile()
+
+        XCTAssertEqual(snapshot.quotas.count, 2)
     }
 
     func testRecentTurnsAreClampedToTwenty() async throws {

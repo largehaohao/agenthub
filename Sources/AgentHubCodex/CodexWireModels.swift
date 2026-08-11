@@ -45,7 +45,7 @@ struct CodexThread {
         switch type {
         case "idle": return .idle
         case "systemError": return .error
-        case "notLoaded": return .disconnected
+        case "notLoaded": return .completed
         default: return .disconnected
         }
     }

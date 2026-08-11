@@ -77,6 +77,7 @@ public enum CodexRPCError: Error, Equatable, Sendable {
     case processExited(Int32)
     case notStarted
     case alreadyStarted
+    case timedOut
 }
 
 public func decodeRPC(_ data: Data) throws -> JSONRPCMessage {

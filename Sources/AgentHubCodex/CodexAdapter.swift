@@ -98,7 +98,8 @@ public actor CodexAdapter: AgentAdapter {
         for session in sessions {
             rootSessionIDByNativeID[session.providerRef.nativeID] = session.id
         }
-        return AdapterSnapshot(sessions: sessions, nodes: nodes, requests: [], quotas: [])
+        let quotas = (try? await quotaWindows()) ?? []
+        return AdapterSnapshot(sessions: sessions, nodes: nodes, requests: [], quotas: quotas)
     }
 
     public func eventStream() async -> AsyncStream<AgentEvent> {
@@ -157,7 +158,11 @@ public actor CodexAdapter: AgentAdapter {
     }
 
     public func quotaWindows() async throws -> [QuotaWindow] {
-        let result = try await rpc.call(method: "account/rateLimits/read", params: nil)
+        let result = try await rpc.call(
+            method: "account/rateLimits/read",
+            params: nil,
+            timeout: .seconds(3)
+        )
         guard let snapshot = result["rateLimits"] else { return [] }
         return try [snapshot["primary"], snapshot["secondary"]]
             .compactMap { $0 }

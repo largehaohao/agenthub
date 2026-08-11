@@ -60,11 +60,13 @@ private func terminationSignals() -> AsyncStream<Int32> {
 private func runDaemon(paths: DaemonPaths) async throws {
     _ = umask(S_IRWXG | S_IRWXO)
     try prepareDirectory(paths.directory)
+    writeLog("runtime prepared")
 
     let store = try AgentHubStore(databaseURL: paths.database)
     let transport = CodexProcess()
     let rpc = CodexRPCClient(transport: transport)
     try await rpc.start(clientName: "AgentHub", clientVersion: AgentHubCoreVersion.current)
+    writeLog("provider connected")
 
     let adapter = CodexAdapter(accountID: "default", rpc: rpc)
     let adapters: [Provider: any AgentAdapter] = [.codex: adapter]
@@ -79,9 +81,11 @@ private func runDaemon(paths: DaemonPaths) async throws {
 
     do {
         try await coordinator.start()
+        writeLog("provider reconciled")
         let server = try await UnixDaemonServer.bind(path: paths.socket) { command in
             await api.handle(command)
         }
+        writeLog("ipc ready")
         let relay = Task {
             let changes = await coordinator.changes()
             for await sequence in changes {
@@ -100,6 +104,10 @@ private func runDaemon(paths: DaemonPaths) async throws {
         await rpc.stop()
         throw error
     }
+}
+
+private func writeLog(_ message: String) {
+    FileHandle.standardOutput.write(Data("agenthubd: \(message)\n".utf8))
 }
 
 do {
