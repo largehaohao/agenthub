@@ -1,20 +1,34 @@
 import Foundation
 import AgentHubCore
 
-enum OpenCodeCredential: Equatable, Sendable {
+public enum OpenCodeCredential: Equatable, Sendable {
     case none
     case ephemeral(username: String, password: String)
     case keychain(username: String, reference: String)
 }
 
-struct OpenCodeRuntimeEndpoint: Equatable, Sendable {
-    var summary: ProviderEndpoint
-    let credential: OpenCodeCredential
-    let processID: Int32?
-    let applicationBundleID: String?
-    let terminalTTY: String?
+public struct OpenCodeRuntimeEndpoint: Equatable, Sendable {
+    public var summary: ProviderEndpoint
+    public let credential: OpenCodeCredential
+    public let processID: Int32?
+    public let applicationBundleID: String?
+    public let terminalTTY: String?
 
-    var id: String { summary.id }
+    public var id: String { summary.id }
+
+    public init(
+        summary: ProviderEndpoint,
+        credential: OpenCodeCredential,
+        processID: Int32?,
+        applicationBundleID: String?,
+        terminalTTY: String?
+    ) {
+        self.summary = summary
+        self.credential = credential
+        self.processID = processID
+        self.applicationBundleID = applicationBundleID
+        self.terminalTTY = terminalTTY
+    }
 }
 
 enum OpenCodeOperation: Sendable {
@@ -24,7 +38,7 @@ enum OpenCodeOperation: Sendable {
     case jump
 }
 
-actor OpenCodeEndpointRegistry {
+public actor OpenCodeEndpointRegistry {
     private struct Observation: Sendable {
         let directory: String
         let observedAt: Date
@@ -33,11 +47,13 @@ actor OpenCodeEndpointRegistry {
     private var endpointsByID: [String: OpenCodeRuntimeEndpoint] = [:]
     private var observationsBySession: [String: [String: Observation]] = [:]
 
-    func upsert(_ endpoint: OpenCodeRuntimeEndpoint) {
+    public init() {}
+
+    public func upsert(_ endpoint: OpenCodeRuntimeEndpoint) {
         endpointsByID[endpoint.id] = endpoint
     }
 
-    func remove(endpointID: String) {
+    public func remove(endpointID: String) {
         endpointsByID.removeValue(forKey: endpointID)
         for sessionID in observationsBySession.keys {
             observationsBySession[sessionID]?.removeValue(forKey: endpointID)
@@ -47,7 +63,7 @@ actor OpenCodeEndpointRegistry {
         }
     }
 
-    func observe(
+    public func observe(
         sessionID: String,
         directory: String,
         endpointID: String,
@@ -60,7 +76,7 @@ actor OpenCodeEndpointRegistry {
         )
     }
 
-    func surfaces(sessionID: String) -> [ProviderEndpointOrigin] {
+    public func surfaces(sessionID: String) -> [ProviderEndpointOrigin] {
         let observed = observationsBySession[sessionID] ?? [:]
         let values = observed.keys.compactMap { endpointID -> ProviderEndpointOrigin? in
             guard let endpoint = endpointsByID[endpointID], endpoint.summary.connected else {

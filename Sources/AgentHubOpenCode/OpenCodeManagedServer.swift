@@ -3,7 +3,7 @@ import Foundation
 import Security
 import AgentHubCore
 
-protocol ManagedOpenCodeServing: Sendable {
+public protocol ManagedOpenCodeServing: Sendable {
     func ensureRunning() async throws -> OpenCodeRuntimeEndpoint
     func stop() async
 }
@@ -71,7 +71,7 @@ struct OpenCodeDiagnosticRing: Sendable {
     }
 }
 
-actor ManagedOpenCodeServer: ManagedOpenCodeServing {
+public actor ManagedOpenCodeServer: ManagedOpenCodeServing {
     typealias ExecutableResolver = @Sendable ([String: String]) throws -> URL
     typealias PortAllocator = @Sendable () throws -> UInt16
     typealias PasswordGenerator = @Sendable () throws -> String
@@ -97,16 +97,28 @@ actor ManagedOpenCodeServer: ManagedOpenCodeServing {
     private var restartTask: Task<Void, Never>?
     private var diagnosticRing = OpenCodeDiagnosticRing()
 
+    public init() {
+        environment = ProcessInfo.processInfo.environment
+        executableResolver = ManagedOpenCodeServer.resolveExecutable
+        portAllocator = ManagedOpenCodeServer.allocateLoopbackPort
+        passwordGenerator = ManagedOpenCodeServer.generatePassword
+        processFactory = { FoundationManagedOpenCodeProcess() }
+        healthProbe = ManagedOpenCodeServer.probeHealth
+        sleep = { try await Task.sleep(for: $0) }
+        readinessAttempts = 100
+        now = Date.init
+    }
+
     init(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        executableResolver: @escaping ExecutableResolver = ManagedOpenCodeServer.resolveExecutable,
-        portAllocator: @escaping PortAllocator = ManagedOpenCodeServer.allocateLoopbackPort,
-        passwordGenerator: @escaping PasswordGenerator = ManagedOpenCodeServer.generatePassword,
-        processFactory: @escaping ProcessFactory = { FoundationManagedOpenCodeProcess() },
-        healthProbe: @escaping HealthProbe = ManagedOpenCodeServer.probeHealth,
-        sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
-        readinessAttempts: Int = 100,
-        now: @escaping @Sendable () -> Date = Date.init
+        environment: [String: String],
+        executableResolver: @escaping ExecutableResolver,
+        portAllocator: @escaping PortAllocator,
+        passwordGenerator: @escaping PasswordGenerator,
+        processFactory: @escaping ProcessFactory,
+        healthProbe: @escaping HealthProbe,
+        sleep: @escaping Sleep,
+        readinessAttempts: Int,
+        now: @escaping @Sendable () -> Date
     ) {
         self.environment = environment
         self.executableResolver = executableResolver
@@ -119,13 +131,13 @@ actor ManagedOpenCodeServer: ManagedOpenCodeServing {
         self.now = now
     }
 
-    func ensureRunning() async throws -> OpenCodeRuntimeEndpoint {
+    public func ensureRunning() async throws -> OpenCodeRuntimeEndpoint {
         desiredRunning = true
         if let endpoint { return endpoint }
         return try await launch()
     }
 
-    func stop() async {
+    public func stop() async {
         guard desiredRunning || process != nil else { return }
         desiredRunning = false
         generation += 1

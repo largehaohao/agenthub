@@ -37,7 +37,7 @@ struct OpenCodeProcessSocketSnapshot: Equatable, Sendable {
     let sockets: [OpenCodeListeningSocket]
 }
 
-protocol OpenCodeEndpointDiscovering: Sendable {
+public protocol OpenCodeEndpointDiscovering: Sendable {
     func discover() async throws -> [OpenCodeRuntimeEndpoint]
 }
 
@@ -66,7 +66,7 @@ enum OpenCodeManualEndpointValidator {
     }
 }
 
-struct MacOpenCodeDiscovery: OpenCodeEndpointDiscovering, Sendable {
+public struct MacOpenCodeDiscovery: OpenCodeEndpointDiscovering, Sendable {
     typealias Snapshot = @Sendable () async throws -> OpenCodeProcessSocketSnapshot
     typealias Probe = @Sendable (URL) async throws -> OpenCodeHealth
 
@@ -75,12 +75,17 @@ struct MacOpenCodeDiscovery: OpenCodeEndpointDiscovering, Sendable {
     private let probe: Probe
     private let now: @Sendable () -> Date
 
+    public init() {
+        uid = getuid()
+        snapshot = { try await MacOpenCodeSnapshotter(uid: getuid()).snapshot() }
+        probe = MacOpenCodeDiscovery.probeHealth
+        now = Date.init
+    }
+
     init(
-        uid: UInt32 = getuid(),
-        snapshot: @escaping Snapshot = {
-            try await MacOpenCodeSnapshotter(uid: getuid()).snapshot()
-        },
-        probe: @escaping Probe = MacOpenCodeDiscovery.probeHealth,
+        uid: UInt32,
+        snapshot: @escaping Snapshot,
+        probe: @escaping Probe,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.uid = uid
@@ -89,7 +94,7 @@ struct MacOpenCodeDiscovery: OpenCodeEndpointDiscovering, Sendable {
         self.now = now
     }
 
-    func discover() async throws -> [OpenCodeRuntimeEndpoint] {
+    public func discover() async throws -> [OpenCodeRuntimeEndpoint] {
         let state = try await snapshot()
         let processes = Dictionary(
             uniqueKeysWithValues: state.processes
