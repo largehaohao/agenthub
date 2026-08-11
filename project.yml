@@ -1,0 +1,33 @@
+name: AgentHub
+options:
+  minimumXcodeGenVersion: 2.45.4
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  AgentHubPackage:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  AgentHubApp:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agenthub.app
+        CODE_SIGN_ENTITLEMENTS: Config/AgentHubApp.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: AgentHubPackage
+        product: AgentHubCore
+      - package: AgentHubPackage
+        product: AgentHubIPC
+schemes:
+  AgentHubApp:
+    build:
+      targets:
+        AgentHubApp: all
