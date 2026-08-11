@@ -105,6 +105,31 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(mode.intValue & 0o777, 0o600)
     }
 
+    func testManualEndpointPersistsOnlyReferenceAndCanBeRemoved() async throws {
+        let url = temporaryDatabaseURL()
+        let store = try AgentHubStore(databaseURL: url)
+        let endpoint = ProviderEndpoint(
+            id: "manual-1",
+            provider: .openCode,
+            origin: .manual,
+            baseURL: "http://127.0.0.1:41789",
+            credentialReference: "keychain-ref",
+            connected: true,
+            version: "1.18.10",
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        try await store.apply(.endpointUpserted(endpoint))
+
+        var restored = try await AgentHubStore(databaseURL: url).snapshot()
+        XCTAssertEqual(restored.endpoints[endpoint.id], endpoint)
+        XCTAssertEqual(restored.endpoints[endpoint.id]?.credentialReference, "keychain-ref")
+
+        try await store.apply(.endpointRemoved(endpoint.id))
+        restored = try await AgentHubStore(databaseURL: url).snapshot()
+        XCTAssertNil(restored.endpoints[endpoint.id])
+    }
+
     private func temporaryDatabaseURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentHubStoreTests-\(UUID().uuidString)", isDirectory: true)

@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import AgentHubCore
+import AgentHubTestSupport
 @testable import AgentHubIPC
 
 final class IPCTests: XCTestCase {
@@ -30,7 +31,7 @@ final class IPCTests: XCTestCase {
         let reply = try await client.send(.getSnapshot)
         XCTAssertEqual(reply, .snapshot(.empty))
         let version = await client.negotiatedProtocolVersion
-        XCTAssertEqual(version, 1)
+        XCTAssertEqual(version, 2)
 
         var iterator = client.events.makeAsyncIterator()
         await server.broadcast(.stateChanged(sequence: 2))
@@ -70,8 +71,52 @@ final class IPCTests: XCTestCase {
     }
 
     func testProtocolRejectsUnknownVersion() {
-        XCTAssertThrowsError(try JSONLineCodec.validate(protocolVersion: 2)) {
-            XCTAssertEqual($0 as? IPCError, .unsupportedProtocolVersion(2))
+        XCTAssertThrowsError(try JSONLineCodec.validate(protocolVersion: 3)) {
+            XCTAssertEqual($0 as? IPCError, .unsupportedProtocolVersion(3))
+        }
+    }
+
+    func testProtocolV2RoundTripsProviderAndEndpointCommands() throws {
+        let attachment = ProviderEndpointAttachment(
+            provider: .openCode,
+            baseURL: "http://127.0.0.1:41789",
+            credentialReference: "keychain-ref"
+        )
+        let binding = ProviderEndpointCredentialBinding(
+            provider: .openCode,
+            endpointID: "desktop-1",
+            credentialReference: "keychain-ref"
+        )
+        let commands: [DaemonCommand] = [
+            .launch(.openCode, .fixture()),
+            .attachEndpoint(attachment),
+            .authenticateEndpoint(binding),
+            .detachEndpoint(provider: .openCode, id: "desktop-1"),
+        ]
+
+        let decoded = try commands.map { command in
+            let data = try JSONLineCodec.encode(IPCEnvelope(body: command))
+            return try JSONDecoder.agentHub.decode(
+                IPCEnvelope<DaemonCommand>.self,
+                from: data
+            )
+        }
+
+        XCTAssertTrue(decoded.allSatisfy { $0.protocolVersion == 2 })
+        guard case .launch(.openCode, let request) = decoded[0].body else {
+            return XCTFail("launch command did not round trip")
+        }
+        XCTAssertEqual(request, .fixture())
+        guard case .attachEndpoint(let restoredAttachment) = decoded[1].body else {
+            return XCTFail("attachment command did not round trip")
+        }
+        XCTAssertEqual(restoredAttachment, attachment)
+        guard case .authenticateEndpoint(let restoredBinding) = decoded[2].body else {
+            return XCTFail("authentication command did not round trip")
+        }
+        XCTAssertEqual(restoredBinding, binding)
+        guard case .detachEndpoint(.openCode, "desktop-1") = decoded[3].body else {
+            return XCTFail("detach command did not round trip")
         }
     }
 

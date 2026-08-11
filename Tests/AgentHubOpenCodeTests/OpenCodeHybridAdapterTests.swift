@@ -311,6 +311,29 @@ final class OpenCodeHybridAdapterTests: XCTestCase {
         }
     }
 
+    func testRestoredDesktopCredentialWaitsForProcessRediscovery() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_root", updated: 1_700_000_001_000)]
+        )
+        let adapter = makeAdapter(endpoints: [], clients: ["desktop": api])
+        let persisted = ProviderEndpoint(
+            id: "desktop",
+            provider: .openCode,
+            origin: .desktop,
+            baseURL: "http://127.0.0.1:41789",
+            credentialReference: "keychain-ref",
+            connected: true,
+            version: "1.18.10",
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        try await adapter.restoreEndpoint(persisted)
+        let snapshot = try await adapter.reconcile()
+
+        XCTAssertTrue(snapshot.endpoints.isEmpty)
+        XCTAssertTrue(snapshot.sessions.isEmpty)
+    }
+
     private func makeAdapter(
         endpoints: [OpenCodeRuntimeEndpoint],
         clients: [String: any OpenCodeAPI],

@@ -93,6 +93,12 @@ public enum StateReducer {
                 session.status = .disconnected
                 state.sessions[id] = session
             }
+
+        case .endpointUpserted(let endpoint):
+            state.endpoints[endpoint.id] = endpoint
+
+        case .endpointRemoved(let id):
+            state.endpoints.removeValue(forKey: id)
         }
     }
 

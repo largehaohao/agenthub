@@ -562,6 +562,8 @@ public enum AgentEvent: Codable, Equatable, Sendable {
     case envelopeUpserted(MessageEnvelope)
     case quotaUpserted(QuotaWindow)
     case adapterHealth(Provider, AdapterHealth)
+    case endpointUpserted(ProviderEndpoint)
+    case endpointRemoved(String)
 }
 
 public struct AdapterHealth: Codable, Equatable, Sendable {

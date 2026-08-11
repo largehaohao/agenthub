@@ -77,6 +77,14 @@ enum AgentHubDatabase {
                 table.primaryKey(["session_id", "turn_id"])
             }
         }
+        migrator.registerMigration("provider-endpoints-v2") { database in
+            try database.create(table: "provider_endpoints") { table in
+                table.column("id", .text).primaryKey()
+                table.column("provider", .text).notNull()
+                table.column("origin", .text).notNull()
+                table.column("body", .blob).notNull()
+            }
+        }
         return migrator
     }
 }

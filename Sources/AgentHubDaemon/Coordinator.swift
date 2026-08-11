@@ -5,6 +5,7 @@ import AgentHubPersistence
 public enum CoordinatorError: Error, Equatable, Sendable {
     case notStarted
     case unsupportedProvider
+    case endpointConfigurationUnsupported
     case sessionNotFound
 }
 
@@ -47,6 +48,12 @@ public actor Coordinator {
         for provider in adapters.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
             guard let adapter = adapters[provider] else { continue }
             do {
+                if let configurable = adapter as? any EndpointConfigurableAdapter {
+                    for endpoint in state.endpoints.values
+                    where endpoint.provider == provider {
+                        try await configurable.restoreEndpoint(endpoint)
+                    }
+                }
                 let snapshot = try await adapter.reconcile()
                 try await merge(snapshot, provider: provider, publish: false)
                 try await persistAndReduce(
@@ -189,6 +196,48 @@ public actor Coordinator {
         return await adapter.jumpTarget(for: session.providerRef)
     }
 
+    public func attachEndpoint(
+        _ attachment: ProviderEndpointAttachment
+    ) async throws -> ProviderEndpoint {
+        guard started else { throw CoordinatorError.notStarted }
+        guard let adapter = adapters[attachment.provider] else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        guard let configurable = adapter as? any EndpointConfigurableAdapter else {
+            throw CoordinatorError.endpointConfigurationUnsupported
+        }
+        let endpoint = try await configurable.attachEndpoint(attachment)
+        try await persistAndReduce(.endpointUpserted(endpoint), publish: true)
+        return endpoint
+    }
+
+    public func authenticateEndpoint(
+        _ binding: ProviderEndpointCredentialBinding
+    ) async throws -> ProviderEndpoint {
+        guard started else { throw CoordinatorError.notStarted }
+        guard let adapter = adapters[binding.provider] else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        guard let configurable = adapter as? any EndpointConfigurableAdapter else {
+            throw CoordinatorError.endpointConfigurationUnsupported
+        }
+        let endpoint = try await configurable.authenticateEndpoint(binding)
+        try await persistAndReduce(.endpointUpserted(endpoint), publish: true)
+        return endpoint
+    }
+
+    public func detachEndpoint(provider: Provider, id: String) async throws {
+        guard started else { throw CoordinatorError.notStarted }
+        guard let adapter = adapters[provider] else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        guard let configurable = adapter as? any EndpointConfigurableAdapter else {
+            throw CoordinatorError.endpointConfigurationUnsupported
+        }
+        try await configurable.detachEndpoint(id: id)
+        try await persistAndReduce(.endpointRemoved(id), publish: true)
+    }
+
     private func merge(
         _ snapshot: AdapterSnapshot,
         provider: Provider,
@@ -216,6 +265,9 @@ public actor Coordinator {
         }
         for quota in snapshot.quotas {
             try await persistAndReduce(.quotaUpserted(quota), publish: publish)
+        }
+        for endpoint in snapshot.endpoints {
+            try await persistAndReduce(.endpointUpserted(endpoint), publish: publish)
         }
     }
 

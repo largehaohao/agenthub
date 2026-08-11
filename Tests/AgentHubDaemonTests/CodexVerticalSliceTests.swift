@@ -33,12 +33,12 @@ final class CodexVerticalSliceTests: XCTestCase {
         }
         let client = try await UnixDaemonClient.connect(path: socketPath)
 
-        let first = try acceptedID(await client.send(.launchCodex(LaunchRequest(
+        let first = try acceptedID(await client.send(.launch(.codex, LaunchRequest(
             clientRequestID: "acceptance-1",
             cwd: directory.path,
             prompt: "Investigate the first task"
         ))))
-        let second = try acceptedID(await client.send(.launchCodex(LaunchRequest(
+        let second = try acceptedID(await client.send(.launch(.codex, LaunchRequest(
             clientRequestID: "acceptance-2",
             cwd: directory.path,
             prompt: "Continue the second task"

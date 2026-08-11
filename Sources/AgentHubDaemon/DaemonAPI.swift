@@ -23,8 +23,18 @@ public actor DaemonAPI {
             case .getSnapshot:
                 return .snapshot(await coordinator.snapshot())
 
-            case .launchCodex(let request):
-                return .accepted(try await coordinator.launch(provider: .codex, request: request))
+            case .launch(let provider, let request):
+                return .accepted(try await coordinator.launch(provider: provider, request: request))
+
+            case .attachEndpoint(let attachment):
+                return .endpoint(try await coordinator.attachEndpoint(attachment))
+
+            case .authenticateEndpoint(let binding):
+                return .endpoint(try await coordinator.authenticateEndpoint(binding))
+
+            case .detachEndpoint(let provider, let id):
+                try await coordinator.detachEndpoint(provider: provider, id: id)
+                return .completed
 
             case .resolveRequest(let id, let decision):
                 try await requests.resolve(id: id, decision: decision)
@@ -77,7 +87,10 @@ public actor DaemonAPI {
     private func publicFailure(for command: DaemonCommand) -> String {
         switch command {
         case .getSnapshot: "Snapshot unavailable"
-        case .launchCodex: "Unable to launch Codex"
+        case .launch(let provider, _): "Unable to launch \(provider.rawValue)"
+        case .attachEndpoint: "Unable to attach provider endpoint"
+        case .authenticateEndpoint: "Unable to authenticate provider endpoint"
+        case .detachEndpoint: "Unable to detach provider endpoint"
         case .resolveRequest: "Unable to resolve request"
         case .sendInput: "Unable to send input"
         case .createHandoff: "Unable to create handoff"

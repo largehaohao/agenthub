@@ -66,6 +66,30 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(persisted.requests[pending.id]?.state, .expired)
         await coordinator.stop()
     }
+
+    func testPersistedEndpointIsRestoredBeforeFirstReconcile() async throws {
+        let store = try makeCoordinatorStore()
+        let endpoint = ProviderEndpoint(
+            id: "manual-1",
+            provider: .codex,
+            origin: .manual,
+            baseURL: "http://127.0.0.1:41789",
+            credentialReference: "keychain-ref",
+            connected: true,
+            lastSeenAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try await store.apply(.endpointUpserted(endpoint))
+        let adapter = TestAdapter()
+        let coordinator = Coordinator(store: store, adapters: [.codex: adapter])
+
+        try await coordinator.start()
+
+        let restored = await adapter.restoredEndpoints
+        let restoredCountAtReconcile = await adapter.restoredEndpointCountAtReconcile
+        XCTAssertEqual(restored, [endpoint])
+        XCTAssertEqual(restoredCountAtReconcile, 1)
+        await coordinator.stop()
+    }
 }
 
 func makeCoordinatorStore() throws -> AgentHubStore {

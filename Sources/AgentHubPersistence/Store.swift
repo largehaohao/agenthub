@@ -43,6 +43,24 @@ public actor AgentHubStore {
                     arguments: [provider.rawValue, body]
                 )
             }
+        case .endpointUpserted(let endpoint):
+            guard shouldPersist(endpoint) else { return }
+            try upsert(
+                table: "provider_endpoints",
+                id: endpoint.id,
+                body: endpoint,
+                extraColumns: [
+                    "provider": endpoint.provider.rawValue,
+                    "origin": endpoint.origin.rawValue,
+                ]
+            )
+        case .endpointRemoved(let id):
+            try database.write { database in
+                try database.execute(
+                    sql: "DELETE FROM provider_endpoints WHERE id = ?",
+                    arguments: [id]
+                )
+            }
         }
     }
 
@@ -83,6 +101,10 @@ public actor AgentHubStore {
                 guard let provider = Provider(rawValue: row["provider"]) else { continue }
                 let value: AdapterHealth = try decode(row["body"])
                 state.adapterHealth[provider] = value
+            }
+            for row in try Row.fetchAll(database, sql: "SELECT body FROM provider_endpoints") {
+                let value: ProviderEndpoint = try decode(row["body"])
+                state.endpoints[value.id] = value
             }
             return state
         }
@@ -294,6 +316,12 @@ public actor AgentHubStore {
             byteCount += size
         }
         return retained.reversed()
+    }
+
+    private func shouldPersist(_ endpoint: ProviderEndpoint) -> Bool {
+        if endpoint.origin == .manual { return true }
+        return endpoint.credentialReference != nil
+            && (endpoint.origin == .desktop || endpoint.origin == .tui)
     }
 }
 

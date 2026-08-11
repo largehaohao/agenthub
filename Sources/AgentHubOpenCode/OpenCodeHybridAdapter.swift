@@ -26,6 +26,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     private var directoryByNativeID: [String: String] = [:]
     private var launchedByClientRequestID: [String: ProviderSessionRef] = [:]
     private var requestKindByID: [String: OpenCodeRequestKind] = [:]
+    private var restoredCredentialReferences: [String: String] = [:]
     private var relayTasks: [String: Task<Void, Never>] = [:]
     private var eventRelayStarted = false
     private var authoritativeRequestIDs = Set<UUID>()
@@ -399,7 +400,13 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     public func restoreEndpoint(_ endpoint: ProviderEndpoint) async throws {
         guard endpoint.provider == .openCode else { throw OpenCodeAdapterError.invalidProvider }
         guard endpoint.origin != .managed else { throw OpenCodeAdapterError.unsupportedEndpoint }
-        let url = try OpenCodeManualEndpointValidator.validate(endpoint.baseURL)
+        _ = try OpenCodeManualEndpointValidator.validate(endpoint.baseURL)
+        if endpoint.origin == .desktop || endpoint.origin == .tui {
+            if let reference = endpoint.credentialReference {
+                restoredCredentialReferences[endpoint.id] = reference
+            }
+            return
+        }
         let runtime = OpenCodeRuntimeEndpoint(
             summary: endpoint,
             credential: endpoint.credentialReference.map {
@@ -409,7 +416,6 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             applicationBundleID: nil,
             terminalTTY: nil
         )
-        _ = url
         endpointsByID[endpoint.id] = runtime
         await registry.upsert(runtime)
     }
@@ -480,12 +486,17 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         runtime.summary.connected = health.healthy
         runtime.summary.version = health.version
         endpointsByID[runtime.id] = runtime
+        restoredCredentialReferences[runtime.id] = binding.credentialReference
         await registry.upsert(runtime)
         return runtime.summary
     }
 
     public func detachEndpoint(id: String) async throws {
-        guard let existing = endpointsByID[id] else { throw OpenCodeAdapterError.endpointNotFound }
+        guard let existing = endpointsByID[id] else {
+            if restoredCredentialReferences.removeValue(forKey: id) != nil { return }
+            throw OpenCodeAdapterError.endpointNotFound
+        }
+        restoredCredentialReferences.removeValue(forKey: id)
         if existing.summary.origin == .manual {
             endpointsByID.removeValue(forKey: id)
             await registry.remove(endpointID: id)
@@ -529,9 +540,39 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             let endpoint: OpenCodeRuntimeEndpoint
             if let existing = endpointsByID[discovered.id],
                case .keychain = existing.credential {
+                let summary = ProviderEndpoint(
+                    id: discovered.summary.id,
+                    provider: discovered.summary.provider,
+                    origin: discovered.summary.origin,
+                    baseURL: discovered.summary.baseURL,
+                    credentialReference: existing.summary.credentialReference,
+                    connected: true,
+                    version: discovered.summary.version,
+                    message: nil,
+                    lastSeenAt: discovered.summary.lastSeenAt
+                )
                 endpoint = OpenCodeRuntimeEndpoint(
-                    summary: discovered.summary,
+                    summary: summary,
                     credential: existing.credential,
+                    processID: discovered.processID,
+                    applicationBundleID: discovered.applicationBundleID,
+                    terminalTTY: discovered.terminalTTY
+                )
+            } else if let reference = restoredCredentialReferences[discovered.id] {
+                let summary = ProviderEndpoint(
+                    id: discovered.summary.id,
+                    provider: discovered.summary.provider,
+                    origin: discovered.summary.origin,
+                    baseURL: discovered.summary.baseURL,
+                    credentialReference: reference,
+                    connected: true,
+                    version: discovered.summary.version,
+                    message: nil,
+                    lastSeenAt: discovered.summary.lastSeenAt
+                )
+                endpoint = OpenCodeRuntimeEndpoint(
+                    summary: summary,
+                    credential: .keychain(username: "opencode", reference: reference),
                     processID: discovered.processID,
                     applicationBundleID: discovered.applicationBundleID,
                     terminalTTY: discovered.terminalTTY

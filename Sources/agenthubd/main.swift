@@ -5,7 +5,9 @@ import AgentHubCodex
 import AgentHubCore
 import AgentHubDaemon
 import AgentHubIPC
+import AgentHubOpenCode
 import AgentHubPersistence
+import AgentHubSecurity
 
 private struct DaemonPaths {
     let directory: URL
@@ -68,8 +70,21 @@ private func runDaemon(paths: DaemonPaths) async throws {
     try await rpc.start(clientName: "AgentHub", clientVersion: AgentHubCoreVersion.current)
     writeLog("provider connected")
 
-    let adapter = CodexAdapter(accountID: "default", rpc: rpc)
-    let adapters: [Provider: any AgentAdapter] = [.codex: adapter]
+    let codexAdapter = CodexAdapter(accountID: "default", rpc: rpc)
+    let credentialStore = KeychainCredentialStore()
+    let openCodeRegistry = OpenCodeEndpointRegistry()
+    let managedOpenCode = ManagedOpenCodeServer()
+    let openCodeDiscovery = MacOpenCodeDiscovery()
+    let openCodeAdapter = OpenCodeHybridAdapter(
+        registry: openCodeRegistry,
+        managedServer: managedOpenCode,
+        discovery: openCodeDiscovery,
+        credentialStore: credentialStore
+    )
+    let adapters: [Provider: any AgentAdapter] = [
+        .codex: codexAdapter,
+        .openCode: openCodeAdapter,
+    ]
     let coordinator = Coordinator(store: store, adapters: adapters)
     let requestService = RequestService(store: store, adapters: adapters)
     let handoffService = HandoffService(store: store, adapters: adapters)
@@ -98,9 +113,11 @@ private func runDaemon(paths: DaemonPaths) async throws {
         relay.cancel()
         await server.stop()
         await coordinator.stop()
+        await openCodeAdapter.shutdown()
         await rpc.stop()
     } catch {
         await coordinator.stop()
+        await openCodeAdapter.shutdown()
         await rpc.stop()
         throw error
     }
