@@ -2,10 +2,134 @@ import Foundation
 import XCTest
 import AgentHubCore
 import AgentHubIPC
+import AgentHubSecurity
 @testable import AgentHubApp
 
 @MainActor
 final class DashboardViewModelTests: XCTestCase {
+    func testLaunchOpenCodeSendsGenericProviderCommand() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(snapshot: fixture.state)
+        let model = DashboardViewModel(client: client)
+        await model.connect()
+
+        await model.launch(
+            provider: .openCode,
+            cwd: "/repo",
+            prompt: "work",
+            agent: nil,
+            model: nil
+        )
+
+        let commands = await client.recordedCommands
+        guard case .launch(.openCode, let request) = commands.dropFirst().first else {
+            return XCTFail("expected OpenCode launch")
+        }
+        XCTAssertEqual(request.cwd, "/repo")
+    }
+
+    func testFailedAttachDeletesNewKeychainReferenceAndNeverSendsSecret() async throws {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            attachReply: .failure("Unable to attach OpenCode endpoint")
+        )
+        let credentials = RecordingCredentialStore()
+        let model = DashboardViewModel(client: client, credentials: credentials)
+        await model.connect()
+
+        await model.attachOpenCode(
+            url: "http://127.0.0.1:41789",
+            password: "secret"
+        )
+
+        XCTAssertEqual(credentials.savedSecrets.map(\.secret), ["secret"])
+        XCTAssertEqual(
+            credentials.deletedReferences,
+            credentials.savedSecrets.map(\.reference)
+        )
+        let commandData = try JSONEncoder.agentHub.encode(await client.recordedCommands)
+        let commandText = String(decoding: commandData, as: UTF8.self)
+        XCTAssertFalse(commandText.contains("secret"))
+    }
+
+    func testDiscoveredEndpointAuthenticationSendsOnlyKeychainReference() async throws {
+        let fixture = DashboardFixture()
+        let endpoint = fixture.openCodeEndpoint
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            authenticateReply: .endpoint(endpoint)
+        )
+        let credentials = RecordingCredentialStore()
+        let model = DashboardViewModel(client: client, credentials: credentials)
+        await model.connect()
+
+        await model.authenticateOpenCode(endpointID: endpoint.id, password: "secret")
+
+        let commands = await client.recordedCommands
+        guard let binding = commands.compactMap({ command -> ProviderEndpointCredentialBinding? in
+            guard case .authenticateEndpoint(let binding) = command else { return nil }
+            return binding
+        }).first else {
+            return XCTFail("expected endpoint authentication")
+        }
+        XCTAssertEqual(binding.endpointID, endpoint.id)
+        XCTAssertNotEqual(binding.credentialReference, "secret")
+        let commandData = try JSONEncoder.agentHub.encode(commands)
+        XCTAssertFalse(String(decoding: commandData, as: UTF8.self).contains("secret"))
+        XCTAssertTrue(credentials.deletedReferences.isEmpty)
+    }
+
+    func testSuccessfulAttachKeepsKeychainReference() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            attachReply: .endpoint(fixture.openCodeEndpoint)
+        )
+        let credentials = RecordingCredentialStore()
+        let model = DashboardViewModel(client: client, credentials: credentials)
+        await model.connect()
+
+        await model.attachOpenCode(
+            url: fixture.openCodeEndpoint.baseURL,
+            password: "secret"
+        )
+
+        XCTAssertEqual(credentials.savedSecrets.count, 1)
+        XCTAssertTrue(credentials.deletedReferences.isEmpty)
+        XCTAssertNil(model.message)
+    }
+
+    func testFixtureContainsMixedOpenCodeDataWithoutInventingQuota() {
+        let state = AppEnvironment.fixtureState()
+
+        XCTAssertTrue(state.sessions.values.contains { $0.providerRef.provider == .openCode })
+        XCTAssertTrue(state.requests.values.contains {
+            $0.provider == .openCode && $0.kind == .choice
+        })
+        XCTAssertTrue(state.endpoints.values.contains { $0.provider == .openCode })
+        XCTAssertFalse(state.quotas.values.contains { $0.provider == .openCode })
+    }
+
+    func testDetachAcknowledgesDaemonBeforeDeletingKeychainReference() async {
+        let fixture = DashboardFixture()
+        let log = RecordingOperationLog()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            detachReply: .completed,
+            operationLog: log
+        )
+        let credentials = RecordingCredentialStore(operationLog: log)
+        let model = DashboardViewModel(client: client, credentials: credentials)
+        await model.connect()
+
+        await model.detachOpenCode(endpoint: fixture.openCodeEndpoint)
+
+        XCTAssertEqual(
+            log.values.suffix(2),
+            ["daemon.detach", "credentials.delete"]
+        )
+    }
     func testResolveDisablesButtonsAfterSubmission() async {
         let fixture = DashboardFixture()
         let client = FakeDaemonClient(snapshot: fixture.state)
@@ -112,15 +236,27 @@ private actor FakeDaemonClient: DaemonClientProtocol {
     private(set) var recordedCommands: [DaemonCommand] = []
     private(set) var connectAttempts = 0
     private var remainingConnectFailures: Int
+    private let attachReply: DaemonReply
+    private let authenticateReply: DaemonReply
+    private let detachReply: DaemonReply
+    private let operationLog: RecordingOperationLog?
 
     init(
         snapshot: AgentHubState,
         jump: JumpTarget = .unavailable("fixture"),
-        connectFailures: Int = 0
+        connectFailures: Int = 0,
+        attachReply: DaemonReply = .failure("unsupported fixture command"),
+        authenticateReply: DaemonReply = .failure("unsupported fixture command"),
+        detachReply: DaemonReply = .failure("unsupported fixture command"),
+        operationLog: RecordingOperationLog? = nil
     ) {
         self.snapshot = snapshot
         self.jump = jump
         remainingConnectFailures = connectFailures
+        self.attachReply = attachReply
+        self.authenticateReply = authenticateReply
+        self.detachReply = detachReply
+        self.operationLog = operationLog
     }
 
     func connect() async throws {
@@ -140,6 +276,15 @@ private actor FakeDaemonClient: DaemonClientProtocol {
             return .jump(jump)
         case .resolveRequest(let id, _):
             return .accepted(id)
+        case .launch:
+            return .accepted(snapshot.sessions.keys.first ?? UUID())
+        case .attachEndpoint:
+            return attachReply
+        case .authenticateEndpoint:
+            return authenticateReply
+        case .detachEndpoint:
+            operationLog?.record("daemon.detach")
+            return detachReply
         default:
             return .failure("unsupported fixture command")
         }
@@ -154,6 +299,7 @@ private struct DashboardFixture {
     let session: AgentSession
     let request: PendingRequest
     let state: AgentHubState
+    let openCodeEndpoint: ProviderEndpoint
 
     init() {
         let sessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
@@ -189,9 +335,58 @@ private struct DashboardFixture {
             reliability: .l1,
             createdAt: now
         )
+        openCodeEndpoint = ProviderEndpoint(
+            id: "openCode:tui:42",
+            provider: .openCode,
+            origin: .tui,
+            baseURL: "http://127.0.0.1:41789",
+            credentialReference: "existing-reference",
+            connected: true,
+            version: "1.18.10",
+            lastSeenAt: now
+        )
         state = AgentHubState(
             sessions: [session.id: session],
-            requests: [request.id: request]
+            requests: [request.id: request],
+            endpoints: [openCodeEndpoint.id: openCodeEndpoint]
         )
+    }
+}
+
+private final class RecordingOperationLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var values: [String] { lock.withLock { storage } }
+    func record(_ value: String) { lock.withLock { storage.append(value) } }
+}
+
+private final class RecordingCredentialStore: CredentialStoring, @unchecked Sendable {
+    struct SavedSecret: Equatable {
+        let secret: String
+        let reference: String
+    }
+
+    private let lock = NSLock()
+    private var savedStorage: [SavedSecret] = []
+    private var deletedStorage: [String] = []
+    private let operationLog: RecordingOperationLog?
+
+    init(operationLog: RecordingOperationLog? = nil) {
+        self.operationLog = operationLog
+    }
+
+    var savedSecrets: [SavedSecret] { lock.withLock { savedStorage } }
+    var deletedReferences: [String] { lock.withLock { deletedStorage } }
+
+    func save(_ secret: String, reference: String) throws {
+        lock.withLock { savedStorage.append(.init(secret: secret, reference: reference)) }
+    }
+
+    func read(reference: String) throws -> String { "secret" }
+
+    func delete(reference: String) throws {
+        lock.withLock { deletedStorage.append(reference) }
+        operationLog?.record("credentials.delete")
     }
 }

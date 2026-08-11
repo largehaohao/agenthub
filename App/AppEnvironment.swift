@@ -27,7 +27,7 @@ enum AppEnvironment {
             .path
     }
 
-    private static func fixtureState() -> AgentHubState {
+    static func fixtureState() -> AgentHubState {
         let now = Date()
         let rootID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
         let session = AgentSession(
@@ -100,12 +100,93 @@ enum AppEnvironment {
             fetchedAt: now,
             source: "fixture"
         )
+        let openCodeID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
+        let openCodeSession = AgentSession(
+            id: openCodeID,
+            providerRef: ProviderSessionRef(
+                provider: .openCode,
+                accountID: "fixture",
+                nativeID: "ses_fixture"
+            ),
+            title: "OpenCode TUI fixture",
+            surface: "OpenCode TUI",
+            ownership: .discovered,
+            status: .idle,
+            rootID: openCodeID,
+            cwd: "/tmp/opencode-fixture",
+            repository: "agenthub",
+            branch: "feat/opencode",
+            lastActivityAt: now.addingTimeInterval(-30),
+            capabilities: [
+                .discover: .l1, .status: .l1, .children: .l1,
+                .recentTurns: .l1, .sendInput: .l1, .resolveRequest: .l1,
+                .jump: .l1,
+            ],
+            preview: [VisibleTurn(
+                id: "opencode-fixture-turn",
+                role: "assistant",
+                text: "OpenCode fixture is ready without contacting a server.",
+                createdAt: now
+            )]
+        )
+        let openCodeQuestion = PendingRequest(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000002")!,
+            provider: .openCode,
+            providerRequestID: "que_fixture",
+            sessionID: openCodeID,
+            threadID: "ses_fixture",
+            kind: .choice,
+            title: "OpenCode question",
+            detail: "Choose the implementation language and add an optional note.",
+            allowedActions: ["answer", "cancel"],
+            fields: [
+                RequestField(
+                    id: "0",
+                    prompt: "Language",
+                    choices: ["Swift", "Rust"]
+                ),
+                RequestField(
+                    id: "1",
+                    prompt: "Optional note",
+                    allowsFreeText: true
+                ),
+            ],
+            state: .pending,
+            reliability: .l1,
+            createdAt: now
+        )
+        let tuiEndpoint = ProviderEndpoint(
+            id: "openCode:tui:fixture",
+            provider: .openCode,
+            origin: .tui,
+            baseURL: "http://127.0.0.1:41789",
+            connected: true,
+            version: "1.18.10",
+            lastSeenAt: now
+        )
+        let manualEndpoint = ProviderEndpoint(
+            id: "openCode:manual:fixture",
+            provider: .openCode,
+            origin: .manual,
+            baseURL: "http://127.0.0.1:41790",
+            credentialReference: "fixture-keychain-reference",
+            connected: true,
+            version: "1.18.10",
+            lastSeenAt: now
+        )
         return AgentHubState(
-            sessions: [session.id: session],
+            sessions: [session.id: session, openCodeSession.id: openCodeSession],
             nodes: [node.id: node],
-            requests: [request.id: request],
+            requests: [request.id: request, openCodeQuestion.id: openCodeQuestion],
             quotas: [primary.id: primary, secondary.id: secondary],
-            adapterHealth: [.codex: AdapterHealth(connected: true, changedAt: now)]
+            adapterHealth: [
+                .codex: AdapterHealth(connected: true, changedAt: now),
+                .openCode: AdapterHealth(connected: true, changedAt: now),
+            ],
+            endpoints: [
+                tuiEndpoint.id: tuiEndpoint,
+                manualEndpoint.id: manualEndpoint,
+            ]
         )
     }
 }
@@ -138,8 +219,38 @@ private actor FixtureDaemonClient: DaemonClientProtocol {
             return .jump(.agentHubDetail(sessionNativeID: session.providerRef.nativeID))
         case .launch:
             return .accepted(state.sessions.keys.first ?? UUID())
-        case .attachEndpoint, .authenticateEndpoint, .detachEndpoint:
-            return .failure("Endpoint changes are unavailable in fixture mode")
+        case .attachEndpoint(let attachment):
+            let endpoint = ProviderEndpoint(
+                id: "fixture:\(UUID().uuidString)",
+                provider: attachment.provider,
+                origin: .manual,
+                baseURL: attachment.baseURL,
+                credentialReference: attachment.credentialReference,
+                connected: true,
+                version: "fixture",
+                lastSeenAt: Date()
+            )
+            state.endpoints[endpoint.id] = endpoint
+            return .endpoint(endpoint)
+        case .authenticateEndpoint(let binding):
+            guard let existing = state.endpoints[binding.endpointID] else {
+                return .failure("Endpoint not found")
+            }
+            let endpoint = ProviderEndpoint(
+                id: existing.id,
+                provider: existing.provider,
+                origin: existing.origin,
+                baseURL: existing.baseURL,
+                credentialReference: binding.credentialReference,
+                connected: true,
+                version: existing.version,
+                lastSeenAt: Date()
+            )
+            state.endpoints[endpoint.id] = endpoint
+            return .endpoint(endpoint)
+        case .detachEndpoint(_, let id):
+            state.endpoints.removeValue(forKey: id)
+            return .completed
         }
     }
 

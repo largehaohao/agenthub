@@ -66,7 +66,7 @@ private struct TreeRowView: View {
                     .frame(width: 7, height: 7)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.title).lineLimit(1)
-                    Text(row.status.label)
+                    Text(row.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -95,6 +95,15 @@ private extension SessionTreeRow {
         switch value {
         case .session(let session): session.title
         case .node(let node): "\(node.kind) · \(node.nativeID)"
+        }
+    }
+
+    var subtitle: String {
+        switch value {
+        case .session(let session):
+            "\(session.providerRef.provider.displayName) · \(session.surface) · \(status.label)"
+        case .node:
+            status.label
         }
     }
 

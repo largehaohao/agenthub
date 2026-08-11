@@ -28,6 +28,8 @@ targets:
         product: AgentHubCore
       - package: AgentHubPackage
         product: AgentHubIPC
+      - package: AgentHubPackage
+        product: AgentHubSecurity
     postBuildScripts:
       - name: Embed agenthubd
         script: |
@@ -58,6 +60,8 @@ targets:
         product: AgentHubCore
       - package: AgentHubPackage
         product: AgentHubIPC
+      - package: AgentHubPackage
+        product: AgentHubSecurity
 schemes:
   AgentHubApp:
     build:

@@ -63,6 +63,9 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Label(session.status.label, systemImage: "circle.fill")
                     .foregroundStyle(session.status.color)
+                Text("\(session.providerRef.provider.displayName) · \(session.surface)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text(session.cwd ?? "No working directory")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -84,7 +87,7 @@ struct SessionDetailView: View {
     }
 
     private func canCompose(_ session: AgentSession) -> Bool {
-        session.ownership == .managed && session.capabilities[.sendInput] == .l1
+        session.capabilities[.sendInput] == .l1
     }
 }
 

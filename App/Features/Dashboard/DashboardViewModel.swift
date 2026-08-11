@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import AgentHubCore
 import AgentHubIPC
+import AgentHubSecurity
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
@@ -12,6 +13,7 @@ final class DashboardViewModel: ObservableObject {
 
     private let client: any DaemonClientProtocol
     private let jumpOpener: any JumpOpening
+    private let credentials: any CredentialStoring
     private let retryDelay: @Sendable (Int) -> Duration
     private var resolvingRequestIDs: Set<UUID> = []
     private var eventTask: Task<Void, Never>?
@@ -19,6 +21,7 @@ final class DashboardViewModel: ObservableObject {
     init(
         client: any DaemonClientProtocol,
         jumpOpener: any JumpOpening = WorkspaceJumpOpener(),
+        credentials: any CredentialStoring = KeychainCredentialStore(),
         retryDelay: @escaping @Sendable (Int) -> Duration = { attempt in
             let delays = ReconnectSchedule.delays
             return .seconds(delays[min(attempt, delays.count - 1)])
@@ -26,6 +29,7 @@ final class DashboardViewModel: ObservableObject {
     ) {
         self.client = client
         self.jumpOpener = jumpOpener
+        self.credentials = credentials
         self.retryDelay = retryDelay
     }
 
@@ -61,14 +65,92 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func launchCodex(cwd: String, prompt: String) async {
+    func launch(
+        provider: Provider,
+        cwd: String,
+        prompt: String,
+        agent: String?,
+        model: LaunchModelSelection?
+    ) async {
         guard !cwd.isEmpty, !prompt.isEmpty else { return }
         let request = LaunchRequest(
             clientRequestID: UUID().uuidString,
             cwd: cwd,
-            prompt: prompt
+            prompt: prompt,
+            agent: nonempty(agent),
+            model: model
         )
-        await perform(.launch(.codex, request), failure: "Unable to launch Codex")
+        await perform(
+            .launch(provider, request),
+            failure: "Unable to launch \(provider.displayName)"
+        )
+    }
+
+    func attachOpenCode(url: String, password: String) async {
+        let reference = nonempty(password).map { _ in "opencode:\(UUID().uuidString)" }
+        do {
+            if let reference {
+                try credentials.save(password, reference: reference)
+            }
+            let reply = try await client.send(.attachEndpoint(.init(
+                provider: .openCode,
+                baseURL: url,
+                credentialReference: reference
+            )))
+            guard case .endpoint = reply else {
+                try? rollback(reference)
+                message = reply.failureMessage ?? "Unable to attach OpenCode endpoint"
+                return
+            }
+            message = nil
+            try? await refresh()
+        } catch {
+            try? rollback(reference)
+            message = "Unable to attach OpenCode endpoint"
+        }
+    }
+
+    func authenticateOpenCode(endpointID: String, password: String) async {
+        guard let password = nonempty(password) else { return }
+        let reference = "opencode:\(UUID().uuidString)"
+        do {
+            try credentials.save(password, reference: reference)
+            let reply = try await client.send(.authenticateEndpoint(.init(
+                provider: .openCode,
+                endpointID: endpointID,
+                credentialReference: reference
+            )))
+            guard case .endpoint = reply else {
+                try? rollback(reference)
+                message = reply.failureMessage ?? "Unable to authenticate OpenCode endpoint"
+                return
+            }
+            message = nil
+            try? await refresh()
+        } catch {
+            try? credentials.delete(reference: reference)
+            message = "Unable to authenticate OpenCode endpoint"
+        }
+    }
+
+    func detachOpenCode(endpoint: ProviderEndpoint) async {
+        do {
+            let reply = try await client.send(.detachEndpoint(
+                provider: .openCode,
+                id: endpoint.id
+            ))
+            guard case .completed = reply else {
+                message = reply.failureMessage ?? "Unable to detach OpenCode endpoint"
+                return
+            }
+            if let reference = endpoint.credentialReference {
+                try credentials.delete(reference: reference)
+            }
+            message = nil
+            try? await refresh()
+        } catch {
+            message = "Unable to detach OpenCode endpoint"
+        }
     }
 
     func resolve(_ id: UUID, decision: RequestDecision) async {
@@ -184,6 +266,16 @@ final class DashboardViewModel: ObservableObject {
                 .first?.id
         }
     }
+
+    private func nonempty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private func rollback(_ reference: String?) throws {
+        if let reference { try credentials.delete(reference: reference) }
+    }
 }
 
 private enum DashboardError: Error {
@@ -194,5 +286,16 @@ private extension DaemonReply {
     var failureMessage: String? {
         guard case .failure(let message) = self else { return nil }
         return message
+    }
+}
+
+extension Provider {
+    var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .openCode: "OpenCode"
+        case .claude: "Claude"
+        case .cursor: "Cursor"
+        }
     }
 }
