@@ -37,6 +37,44 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(model.selectedSessionID, fixture.session.id)
     }
 
+    func testJumpApplicationUsesInjectedOpener() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            jump: .application(
+                bundleID: "com.googlecode.iterm2",
+                windowHint: "OpenCode ses_1"
+            )
+        )
+        let opener = RecordingJumpOpener()
+        let model = DashboardViewModel(client: client, jumpOpener: opener)
+        await model.connect()
+
+        await model.jump(to: fixture.session.id)
+
+        XCTAssertEqual(
+            opener.opened,
+            [.init(bundleID: "com.googlecode.iterm2", windowHint: "OpenCode ses_1")]
+        )
+        XCTAssertNil(model.message)
+    }
+
+    func testUnavailableJumpDisplaysProviderReasonWithoutOpening() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            jump: .unavailable("OpenCode route is stale")
+        )
+        let opener = RecordingJumpOpener()
+        let model = DashboardViewModel(client: client, jumpOpener: opener)
+        await model.connect()
+
+        await model.jump(to: fixture.session.id)
+
+        XCTAssertTrue(opener.opened.isEmpty)
+        XCTAssertEqual(model.message, "OpenCode route is stale")
+    }
+
     func testInitialConnectionFailureRetriesUntilDaemonIsAvailable() async {
         let fixture = DashboardFixture()
         let client = FakeDaemonClient(snapshot: fixture.state, connectFailures: 1)
@@ -51,6 +89,20 @@ final class DashboardViewModelTests: XCTestCase {
         let connectAttempts = await client.connectAttempts
         XCTAssertEqual(connectAttempts, 2)
         XCTAssertEqual(model.state.sessions.count, 1)
+    }
+}
+
+@MainActor
+private final class RecordingJumpOpener: JumpOpening {
+    struct Call: Equatable {
+        let bundleID: String
+        let windowHint: String?
+    }
+
+    private(set) var opened: [Call] = []
+
+    func open(bundleID: String, windowHint: String?) async throws {
+        opened.append(.init(bundleID: bundleID, windowHint: windowHint))
     }
 }
 

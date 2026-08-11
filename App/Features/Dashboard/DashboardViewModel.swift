@@ -11,18 +11,21 @@ final class DashboardViewModel: ObservableObject {
     @Published private(set) var message: String?
 
     private let client: any DaemonClientProtocol
+    private let jumpOpener: any JumpOpening
     private let retryDelay: @Sendable (Int) -> Duration
     private var resolvingRequestIDs: Set<UUID> = []
     private var eventTask: Task<Void, Never>?
 
     init(
         client: any DaemonClientProtocol,
+        jumpOpener: any JumpOpening = WorkspaceJumpOpener(),
         retryDelay: @escaping @Sendable (Int) -> Duration = { attempt in
             let delays = ReconnectSchedule.delays
             return .seconds(delays[min(attempt, delays.count - 1)])
         }
     ) {
         self.client = client
+        self.jumpOpener = jumpOpener
         self.retryDelay = retryDelay
     }
 
@@ -65,7 +68,7 @@ final class DashboardViewModel: ObservableObject {
             cwd: cwd,
             prompt: prompt
         )
-        await perform(.launchCodex(request), failure: "Unable to launch Codex")
+        await perform(.launch(.codex, request), failure: "Unable to launch Codex")
     }
 
     func resolve(_ id: UUID, decision: RequestDecision) async {
@@ -125,8 +128,18 @@ final class DashboardViewModel: ObservableObject {
                 selectedSessionID = sessionID
             case .jump(.terminal):
                 message = "Terminal jump is not available for this session"
-            case .jump(.application), .jump(.unavailable):
-                message = "This session cannot be opened automatically"
+            case .jump(.application(let bundleID, let windowHint)):
+                do {
+                    try await jumpOpener.open(
+                        bundleID: bundleID,
+                        windowHint: windowHint
+                    )
+                    message = nil
+                } catch {
+                    message = "Unable to open \(bundleID)"
+                }
+            case .jump(.unavailable(let reason)):
+                message = reason
             case .failure(let reason):
                 message = reason
             default:

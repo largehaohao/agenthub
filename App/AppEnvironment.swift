@@ -136,8 +136,10 @@ private actor FixtureDaemonClient: DaemonClientProtocol {
                 return .failure("Session not found")
             }
             return .jump(.agentHubDetail(sessionNativeID: session.providerRef.nativeID))
-        case .launchCodex:
+        case .launch:
             return .accepted(state.sessions.keys.first ?? UUID())
+        case .attachEndpoint, .authenticateEndpoint, .detachEndpoint:
+            return .failure("Endpoint changes are unavailable in fixture mode")
         }
     }
 

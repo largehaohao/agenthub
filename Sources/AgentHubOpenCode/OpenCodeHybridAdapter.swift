@@ -385,11 +385,28 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
                 sessionID: session.nativeID,
                 directory: directory,
                 operation: .jump
-              ) else {
+        ) else {
             return .unavailable("OpenCode route is stale")
         }
+        do {
+            try await client(for: route).selectSession(
+                id: session.nativeID,
+                directory: directory
+            )
+        } catch {
+            if let bundleID = route.applicationBundleID {
+                return .application(
+                    bundleID: bundleID,
+                    windowHint: "OpenCode \(session.nativeID)"
+                )
+            }
+            return .agentHubDetail(sessionNativeID: session.nativeID)
+        }
         if let bundleID = route.applicationBundleID {
-            return .application(bundleID: bundleID, windowHint: session.nativeID)
+            return .application(
+                bundleID: bundleID,
+                windowHint: "OpenCode \(session.nativeID)"
+            )
         }
         if let tty = route.terminalTTY {
             return .terminal(pane: tty)

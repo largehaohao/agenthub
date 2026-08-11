@@ -5,6 +5,59 @@ import AgentHubSecurity
 @testable import AgentHubOpenCode
 
 final class OpenCodeHybridAdapterTests: XCTestCase {
+    func testJumpSelectsTUISessionBeforeReturningOwningApplication() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_1", updated: 1_700_000_001_000)]
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint(
+                "tui",
+                origin: .tui,
+                applicationBundleID: "com.googlecode.iterm2"
+            )],
+            clients: ["tui": api]
+        )
+        _ = try await adapter.reconcile()
+
+        let target = await adapter.jumpTarget(for: ProviderSessionRef(
+            provider: .openCode,
+            accountID: "local-default",
+            nativeID: "ses_1"
+        ))
+
+        let selectedSessions = await api.selectedSessions()
+        XCTAssertEqual(selectedSessions, ["ses_1"])
+        XCTAssertEqual(
+            target,
+            .application(
+                bundleID: "com.googlecode.iterm2",
+                windowHint: "OpenCode ses_1"
+            )
+        )
+    }
+
+    func testJumpFallsBackToAgentHubDetailWhenSelectionAndSurfaceAreUnavailable() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_1", updated: 1_700_000_001_000)],
+            selectSessionError: .httpStatus(404)
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint("managed", origin: .managed)],
+            clients: ["managed": api]
+        )
+        _ = try await adapter.reconcile()
+
+        let target = await adapter.jumpTarget(for: ProviderSessionRef(
+            provider: .openCode,
+            accountID: "local-default",
+            nativeID: "ses_1"
+        ))
+
+        let selectedSessions = await api.selectedSessions()
+        XCTAssertEqual(selectedSessions, ["ses_1"])
+        XCTAssertEqual(target, .agentHubDetail(sessionNativeID: "ses_1"))
+    }
+
     func testReconcileMergesSessionAndBuildsExplicitChildTree() async throws {
         let desktopAPI = FakeOpenCodeAPI(
             sessions: [
@@ -353,7 +406,8 @@ final class OpenCodeHybridAdapterTests: XCTestCase {
 
     private func endpoint(
         _ id: String,
-        origin: ProviderEndpointOrigin
+        origin: ProviderEndpointOrigin,
+        applicationBundleID: String? = nil
     ) -> OpenCodeRuntimeEndpoint {
         OpenCodeRuntimeEndpoint(
             summary: ProviderEndpoint(
@@ -367,7 +421,8 @@ final class OpenCodeHybridAdapterTests: XCTestCase {
             ),
             credential: .none,
             processID: 100,
-            applicationBundleID: origin == .desktop ? "ai.opencode.desktop" : nil,
+            applicationBundleID: applicationBundleID
+                ?? (origin == .desktop ? "ai.opencode.desktop" : nil),
             terminalTTY: origin == .tui ? "ttys001" : nil
         )
     }
@@ -454,6 +509,7 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
     private let createdSession: OpenCodeSession?
     private let promptError: Error?
     private let permissionReplyError: OpenCodeHTTPError?
+    private let selectSessionError: OpenCodeHTTPError?
     private var storedPermissions: [OpenCodePermissionRequest]
     private let storedQuestions: [OpenCodeQuestionRequest]
     private let eventStream: AsyncThrowingStream<OpenCodeEvent, Error>
@@ -464,6 +520,7 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
     private var requestedMessageLimits: [Int] = []
     private var permissionReplies: [(id: String, reply: OpenCodePermissionReply)] = []
     private var questionReplies: [(id: String, answers: [[String]])] = []
+    private var selectedSessionIDs: [String] = []
 
     init(
         sessions: [OpenCodeSession],
@@ -473,7 +530,8 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
         promptError: Error? = nil,
         permissions: [OpenCodePermissionRequest] = [],
         questions: [OpenCodeQuestionRequest] = [],
-        permissionReplyError: OpenCodeHTTPError? = nil
+        permissionReplyError: OpenCodeHTTPError? = nil,
+        selectSessionError: OpenCodeHTTPError? = nil
     ) {
         storedSessions = sessions
         storedStatuses = statuses
@@ -481,6 +539,7 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
         self.createdSession = createdSession
         self.promptError = promptError
         self.permissionReplyError = permissionReplyError
+        self.selectSessionError = selectSessionError
         storedPermissions = permissions
         storedQuestions = questions
         let eventPair = AsyncThrowingStream<OpenCodeEvent, Error>.makeStream()
@@ -545,7 +604,10 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
         eventSubscriptions += 1
         return eventStream
     }
-    func selectSession(id: String, directory: String?) async throws {}
+    func selectSession(id: String, directory: String?) async throws {
+        selectedSessionIDs.append(id)
+        if let selectSessionError { throw selectSessionError }
+    }
 
     func messageLimits() -> [Int] { requestedMessageLimits }
     func prompts() -> [AgentInput] { promptInputs }
@@ -564,4 +626,5 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
         eventContinuation.yield(event)
     }
     func eventSubscriptionCount() -> Int { eventSubscriptions }
+    func selectedSessions() -> [String] { selectedSessionIDs }
 }
