@@ -79,6 +79,17 @@ let package = Package(
             dependencies: ["AgentHubSecurity"]
         ),
         .testTarget(
+            name: "AgentHubOpenCodeTests",
+            dependencies: [
+                "AgentHubCore",
+                "AgentHubOpenCode",
+                "AgentHubSecurity",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ]
+        ),
+        .testTarget(
             name: "AgentHubPersistenceTests",
             dependencies: ["AgentHubPersistence", "AgentHubTestSupport"]
         ),

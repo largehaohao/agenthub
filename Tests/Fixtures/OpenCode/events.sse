@@ -1,0 +1,7 @@
+: heartbeat
+
+event: session.updated
+data: {"type":"session.updated","properties":{"info":{"id":"ses_root"}}}
+
+event: future.event
+data: {"type":"future.event","properties":{}}

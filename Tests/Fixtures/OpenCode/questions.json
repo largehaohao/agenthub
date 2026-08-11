@@ -1,0 +1,18 @@
+[
+  {
+    "id": "que_1",
+    "sessionID": "ses_root",
+    "questions": [
+      {
+        "question": "Choose a language",
+        "header": "Language",
+        "options": [
+          {"label": "Swift", "description": "Use Swift"},
+          {"label": "Rust", "description": "Use Rust"}
+        ],
+        "multiple": false,
+        "custom": false
+      }
+    ]
+  }
+]

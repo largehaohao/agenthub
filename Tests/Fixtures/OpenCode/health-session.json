@@ -1,0 +1,13 @@
+{
+  "id": "ses_1",
+  "slug": "agenthub-task",
+  "projectID": "project-1",
+  "directory": "/tmp/repository",
+  "title": "AgentHub task",
+  "version": "1.18.10",
+  "time": {
+    "created": 1700000000000,
+    "updated": 1700000001000
+  },
+  "futureField": "ignored"
+}
