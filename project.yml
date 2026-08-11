@@ -16,6 +16,8 @@ targets:
     platform: macOS
     sources:
       - App
+      - path: Support/com.agenthub.daemon.plist
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.agenthub.app
@@ -26,6 +28,25 @@ targets:
         product: AgentHubCore
       - package: AgentHubPackage
         product: AgentHubIPC
+    postBuildScripts:
+      - name: Embed agenthubd
+        script: |
+          set -euo pipefail
+          if [[ "$CONFIGURATION" == "Release" ]]; then
+            SWIFT_CONFIGURATION="release"
+          else
+            SWIFT_CONFIGURATION="debug"
+          fi
+          xcrun swift build \
+            --package-path "$SRCROOT" \
+            --product agenthubd \
+            --configuration "$SWIFT_CONFIGURATION"
+          HELPER_DIR="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers"
+          mkdir -p "$HELPER_DIR"
+          install -m 700 "$SRCROOT/.build/$SWIFT_CONFIGURATION/agenthubd" "$HELPER_DIR/agenthubd"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthubd
+        basedOnDependencyAnalysis: false
   AgentHubAppTests:
     type: bundle.unit-test
     platform: macOS
