@@ -1,6 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
+git diff --check
 swift test
 plutil -lint Support/com.agenthub.daemon.plist
 zsh -n Support/install-daemon.sh Support/uninstall-daemon.sh

@@ -75,6 +75,7 @@ let package = Package(
             name: "AgentHubDaemonTests",
             dependencies: [
                 "AgentHubDaemon",
+                "AgentHubCodex",
                 "AgentHubCore",
                 "AgentHubIPC",
                 "AgentHubPersistence",
