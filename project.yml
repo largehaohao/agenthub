@@ -26,8 +26,22 @@ targets:
         product: AgentHubCore
       - package: AgentHubPackage
         product: AgentHubIPC
+  AgentHubAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/AgentHubAppTests
+    dependencies:
+      - target: AgentHubApp
+      - package: AgentHubPackage
+        product: AgentHubCore
+      - package: AgentHubPackage
+        product: AgentHubIPC
 schemes:
   AgentHubApp:
     build:
       targets:
         AgentHubApp: all
+    test:
+      targets:
+        - AgentHubAppTests
