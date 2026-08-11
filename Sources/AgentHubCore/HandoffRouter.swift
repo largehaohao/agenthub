@@ -9,6 +9,7 @@ public enum HandoffEligibility: Equatable, Sendable {
 
 public enum AdapterOperationError: Error, Equatable, Sendable {
     case requestAlreadyResolved
+    case unsupportedDecision
 }
 
 public enum HandoffRouter {

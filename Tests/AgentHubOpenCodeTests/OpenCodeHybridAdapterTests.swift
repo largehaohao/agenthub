@@ -133,6 +133,184 @@ final class OpenCodeHybridAdapterTests: XCTestCase {
         XCTAssertEqual(snapshot.sessions.map(\.providerRef.nativeID), ["ses_created"])
     }
 
+    func testPermissionAndOrderedQuestionBecomeNormalizedRequests() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_root", updated: 1_700_000_001_000)],
+            permissions: [
+                .init(
+                    id: "per_1",
+                    sessionID: "ses_root",
+                    permission: "bash",
+                    patterns: ["swift test"],
+                    always: ["swift test"]
+                ),
+            ],
+            questions: [
+                .init(
+                    id: "que_1",
+                    sessionID: "ses_root",
+                    questions: [
+                        .init(
+                            question: "Choose a language",
+                            header: "Language",
+                            options: [
+                                .init(label: "Swift", description: "Use Swift"),
+                                .init(label: "Rust", description: "Use Rust"),
+                            ],
+                            multiple: false,
+                            custom: false
+                        ),
+                        .init(
+                            question: "Optional note",
+                            header: "Note",
+                            options: [],
+                            multiple: false,
+                            custom: true
+                        ),
+                    ]
+                ),
+            ]
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint("desktop", origin: .desktop)],
+            clients: ["desktop": api]
+        )
+
+        let snapshot = try await adapter.reconcile()
+        let permission = try XCTUnwrap(snapshot.requests.first { $0.kind == .permission })
+        let question = try XCTUnwrap(snapshot.requests.first { $0.kind == .choice })
+
+        XCTAssertTrue(snapshot.requestsAreAuthoritative)
+        XCTAssertEqual(permission.allowedActions, ["once", "always", "reject"])
+        XCTAssertEqual(permission.threadID, "ses_root")
+        XCTAssertEqual(question.fields.map(\.id), ["0", "1"])
+        XCTAssertEqual(question.fields[0].choices, ["Swift", "Rust"])
+        XCTAssertTrue(question.fields[1].allowsFreeText)
+    }
+
+    func testResolveMapsPermissionAndPreservesOrderedQuestionAnswers() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_root", updated: 1_700_000_001_000)],
+            permissions: [
+                .init(
+                    id: "per_1",
+                    sessionID: "ses_root",
+                    permission: "bash",
+                    patterns: [],
+                    always: []
+                ),
+            ],
+            questions: [
+                .init(id: "que_1", sessionID: "ses_root", questions: []),
+            ]
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint("tui", origin: .tui)],
+            clients: ["tui": api]
+        )
+        _ = try await adapter.reconcile()
+        let permission = ProviderRequestRef(
+            provider: .openCode,
+            requestID: "per_1",
+            threadID: "ses_root"
+        )
+        let question = ProviderRequestRef(
+            provider: .openCode,
+            requestID: "que_1",
+            threadID: "ses_root"
+        )
+
+        try await adapter.resolve(permission, decision: .accept)
+        try await adapter.resolve(permission, decision: .acceptForSession)
+        try await adapter.resolve(permission, decision: .decline)
+        try await adapter.resolve(question, decision: .answers([["Swift"], ["free text"]]))
+        let permissionReplies = await api.recordedPermissionReplies()
+        let questionReplies = await api.recordedQuestionReplies()
+
+        XCTAssertEqual(permissionReplies.map(\.reply), [.once, .always, .reject])
+        XCTAssertEqual(questionReplies.first?.answers, [["Swift"], ["free text"]])
+    }
+
+    func testEventStreamStartsOneRelayAndReconcilesPermissionEvent() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_root", updated: 1_700_000_001_000)]
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint("desktop", origin: .desktop)],
+            clients: ["desktop": api]
+        )
+        _ = try await adapter.reconcile()
+
+        let firstStream = await adapter.eventStream()
+        _ = await adapter.eventStream()
+        for _ in 0..<100 {
+            if await api.eventSubscriptionCount() > 0 { break }
+            await Task.yield()
+        }
+        let subscriptions = await api.eventSubscriptionCount()
+        guard subscriptions == 1 else {
+            return XCTFail("expected exactly one endpoint relay, got \(subscriptions)")
+        }
+
+        await api.setPermissions([
+            .init(
+                id: "per_live",
+                sessionID: "ses_root",
+                permission: "bash",
+                patterns: ["swift test"],
+                always: []
+            ),
+        ])
+        let eventTask = Task { () -> AgentEvent? in
+            for await event in firstStream { return event }
+            return nil
+        }
+        await api.emitEvent(.init(type: "permission.updated", propertiesJSON: Data("{}".utf8)))
+
+        guard case .requestUpserted(let request) = await eventTask.value else {
+            return XCTFail("missing normalized live permission event")
+        }
+        XCTAssertEqual(request.providerRequestID, "per_live")
+        XCTAssertEqual(
+            request.id,
+            stableOpenCodeUUID(accountID: "local-default", nativeID: "request:per_live")
+        )
+        await adapter.shutdown()
+    }
+
+    func testAlreadyResolvedPermissionMapsToSharedIdempotentError() async throws {
+        let api = FakeOpenCodeAPI(
+            sessions: [session("ses_root", updated: 1_700_000_001_000)],
+            permissions: [
+                .init(
+                    id: "per_1",
+                    sessionID: "ses_root",
+                    permission: "bash",
+                    patterns: [],
+                    always: []
+                ),
+            ],
+            permissionReplyError: .alreadyResolved
+        )
+        let adapter = makeAdapter(
+            endpoints: [endpoint("tui", origin: .tui)],
+            clients: ["tui": api]
+        )
+        _ = try await adapter.reconcile()
+        let request = ProviderRequestRef(
+            provider: .openCode,
+            requestID: "per_1",
+            threadID: "ses_root"
+        )
+
+        do {
+            try await adapter.resolve(request, decision: .accept)
+            XCTFail("expected idempotent already-resolved error")
+        } catch {
+            XCTAssertEqual(error as? AdapterOperationError, .requestAlreadyResolved)
+        }
+    }
+
     private func makeAdapter(
         endpoints: [OpenCodeRuntimeEndpoint],
         clients: [String: any OpenCodeAPI],
@@ -252,22 +430,39 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
     private let storedMessages: [OpenCodeMessage]
     private let createdSession: OpenCodeSession?
     private let promptError: Error?
+    private let permissionReplyError: OpenCodeHTTPError?
+    private var storedPermissions: [OpenCodePermissionRequest]
+    private let storedQuestions: [OpenCodeQuestionRequest]
+    private let eventStream: AsyncThrowingStream<OpenCodeEvent, Error>
+    private let eventContinuation: AsyncThrowingStream<OpenCodeEvent, Error>.Continuation
+    private var eventSubscriptions = 0
     private var creates = 0
     private var promptInputs: [AgentInput] = []
     private var requestedMessageLimits: [Int] = []
+    private var permissionReplies: [(id: String, reply: OpenCodePermissionReply)] = []
+    private var questionReplies: [(id: String, answers: [[String]])] = []
 
     init(
         sessions: [OpenCodeSession],
         statuses: [String: OpenCodeSessionStatus] = [:],
         messages: [OpenCodeMessage] = [],
         createdSession: OpenCodeSession? = nil,
-        promptError: Error? = nil
+        promptError: Error? = nil,
+        permissions: [OpenCodePermissionRequest] = [],
+        questions: [OpenCodeQuestionRequest] = [],
+        permissionReplyError: OpenCodeHTTPError? = nil
     ) {
         storedSessions = sessions
         storedStatuses = statuses
         storedMessages = messages
         self.createdSession = createdSession
         self.promptError = promptError
+        self.permissionReplyError = permissionReplyError
+        storedPermissions = permissions
+        storedQuestions = questions
+        let eventPair = AsyncThrowingStream<OpenCodeEvent, Error>.makeStream()
+        eventStream = eventPair.stream
+        eventContinuation = eventPair.continuation
     }
 
     func health() async throws -> OpenCodeHealth { .init(healthy: true, version: "1.18.10") }
@@ -305,17 +500,27 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
         if let promptError { throw promptError }
     }
 
-    func permissions(directory: String?) async throws -> [OpenCodePermissionRequest] { [] }
+    func permissions(directory: String?) async throws -> [OpenCodePermissionRequest] {
+        storedPermissions
+    }
     func replyPermission(
         id: String,
         reply: OpenCodePermissionReply,
         message: String?,
         directory: String?
-    ) async throws {}
-    func questions(directory: String?) async throws -> [OpenCodeQuestionRequest] { [] }
-    func replyQuestion(id: String, answers: [[String]], directory: String?) async throws {}
+    ) async throws {
+        if let permissionReplyError { throw permissionReplyError }
+        permissionReplies.append((id, reply))
+    }
+    func questions(directory: String?) async throws -> [OpenCodeQuestionRequest] {
+        storedQuestions
+    }
+    func replyQuestion(id: String, answers: [[String]], directory: String?) async throws {
+        questionReplies.append((id, answers))
+    }
     func events(directory: String?) async -> AsyncThrowingStream<OpenCodeEvent, Error> {
-        AsyncThrowingStream { $0.finish() }
+        eventSubscriptions += 1
+        return eventStream
     }
     func selectSession(id: String, directory: String?) async throws {}
 
@@ -323,4 +528,17 @@ private actor FakeOpenCodeAPI: OpenCodeAPI {
     func prompts() -> [AgentInput] { promptInputs }
     func createCount() -> Int { creates }
     func promptCount() -> Int { promptInputs.count }
+    func recordedPermissionReplies() -> [(id: String, reply: OpenCodePermissionReply)] {
+        permissionReplies
+    }
+    func recordedQuestionReplies() -> [(id: String, answers: [[String]])] {
+        questionReplies
+    }
+    func setPermissions(_ permissions: [OpenCodePermissionRequest]) {
+        storedPermissions = permissions
+    }
+    func emitEvent(_ event: OpenCodeEvent) {
+        eventContinuation.yield(event)
+    }
+    func eventSubscriptionCount() -> Int { eventSubscriptions }
 }

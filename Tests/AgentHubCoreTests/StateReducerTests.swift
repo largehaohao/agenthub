@@ -30,4 +30,22 @@ final class StateReducerTests: XCTestCase {
 
         XCTAssertEqual(state.requests[resolved.id]?.state, .resolved)
     }
+
+    func testRequestExpiredMovesPendingRequestToExpired() {
+        var pendingState = AgentHubState.empty
+        let pending = PendingRequest.fixture(state: .pending)
+        StateReducer.reduce(state: &pendingState, event: .requestUpserted(pending))
+
+        StateReducer.reduce(state: &pendingState, event: .requestExpired(id: pending.id))
+
+        XCTAssertEqual(pendingState.requests[pending.id]?.state, .expired)
+    }
+
+    func testRequestExpiredDoesNotChangeResolvedRequest() {
+        var resolvedState = AgentHubState.empty
+        let resolved = PendingRequest.fixture(state: .resolved)
+        StateReducer.reduce(state: &resolvedState, event: .requestUpserted(resolved))
+        StateReducer.reduce(state: &resolvedState, event: .requestExpired(id: resolved.id))
+        XCTAssertEqual(resolvedState.requests[resolved.id]?.state, .resolved)
+    }
 }

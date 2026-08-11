@@ -48,7 +48,7 @@ public actor Coordinator {
             guard let adapter = adapters[provider] else { continue }
             do {
                 let snapshot = try await adapter.reconcile()
-                try await merge(snapshot, publish: false)
+                try await merge(snapshot, provider: provider, publish: false)
                 try await persistAndReduce(
                     .adapterHealth(
                         provider,
@@ -133,7 +133,7 @@ public actor Coordinator {
     ) async throws -> UUID {
         let reference = try await adapter.launch(request)
         let reconciled = try await adapter.reconcile()
-        try await merge(reconciled, publish: true)
+        try await merge(reconciled, provider: adapter.provider, publish: true)
         let id: UUID
         if let session = state.sessions.values.first(where: { $0.providerRef == reference }) {
             id = session.id
@@ -189,7 +189,11 @@ public actor Coordinator {
         return await adapter.jumpTarget(for: session.providerRef)
     }
 
-    private func merge(_ snapshot: AdapterSnapshot, publish: Bool) async throws {
+    private func merge(
+        _ snapshot: AdapterSnapshot,
+        provider: Provider,
+        publish: Bool
+    ) async throws {
         for session in snapshot.sessions {
             try await persistAndReduce(.sessionUpserted(session), publish: publish)
         }
@@ -198,6 +202,17 @@ public actor Coordinator {
         }
         for request in snapshot.requests {
             try await persistAndReduce(.requestUpserted(request), publish: publish)
+        }
+        if snapshot.requestsAreAuthoritative {
+            let currentIDs = Set(snapshot.requests.map(\.id))
+            let expiredIDs = state.requests.values.filter {
+                $0.provider == provider
+                    && ($0.state == .pending || $0.state == .resolving)
+                    && !currentIDs.contains($0.id)
+            }.map(\.id)
+            for id in expiredIDs {
+                try await persistAndReduce(.requestExpired(id: id), publish: publish)
+            }
         }
         for quota in snapshot.quotas {
             try await persistAndReduce(.quotaUpserted(quota), publish: publish)

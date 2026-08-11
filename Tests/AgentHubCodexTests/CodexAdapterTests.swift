@@ -97,6 +97,23 @@ final class CodexAdapterTests: XCTestCase {
         XCTAssertEqual(request.kind, .permission)
     }
 
+    func testOrderedAnswersAreRejectedRatherThanFlattened() async {
+        let transport = MethodResponseTransport(responses: [:])
+        let adapter = CodexAdapter(accountID: "personal", rpc: CodexRPCClient(transport: transport))
+        let request = ProviderRequestRef(
+            provider: .codex,
+            requestID: "question-1",
+            threadID: "root-thread"
+        )
+
+        do {
+            try await adapter.resolve(request, decision: .answers([["first"], ["second"]]))
+            XCTFail("expected unsupported ordered-answer decision")
+        } catch {
+            XCTAssertEqual(error as? AdapterOperationError, .unsupportedDecision)
+        }
+    }
+
     private func makeAdapter(threadFixture: String) throws -> CodexAdapter {
         let result = try fixture(named: threadFixture)
         let transport = MethodResponseTransport(responses: ["thread/list": result])

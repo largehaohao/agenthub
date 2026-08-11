@@ -43,6 +43,29 @@ final class CoordinatorTests: XCTestCase {
         XCTAssertEqual(persisted.sessions[session.id]?.status, .working)
         await coordinator.stop()
     }
+
+    func testAuthoritativeSnapshotExpiresMissingProviderRequest() async throws {
+        let store = try makeCoordinatorStore()
+        let pending = PendingRequest.fixture(state: .pending)
+        try await store.apply(.requestUpserted(pending))
+        let adapter = TestAdapter()
+        await adapter.setSnapshot(AdapterSnapshot(
+            sessions: [],
+            nodes: [],
+            requests: [],
+            quotas: [],
+            requestsAreAuthoritative: true
+        ))
+        let coordinator = Coordinator(store: store, adapters: [.codex: adapter])
+
+        try await coordinator.start()
+
+        let snapshot = await coordinator.snapshot()
+        let persisted = try await store.snapshot()
+        XCTAssertEqual(snapshot.requests[pending.id]?.state, .expired)
+        XCTAssertEqual(persisted.requests[pending.id]?.state, .expired)
+        await coordinator.stop()
+    }
 }
 
 func makeCoordinatorStore() throws -> AgentHubStore {

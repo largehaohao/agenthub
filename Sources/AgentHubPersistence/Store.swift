@@ -26,6 +26,8 @@ public actor AgentHubStore {
             try updateRequest(id: id, resolved: false)
         case .requestResolved(let id, _):
             try updateRequest(id: id, resolved: true)
+        case .requestExpired(let id):
+            try expireRequest(id: id)
         case .envelopeUpserted(let envelope):
             try upsert(table: "message_envelopes", id: envelope.id.uuidString, body: envelope)
         case .quotaUpserted(let quota):
@@ -235,6 +237,24 @@ public actor AgentHubStore {
             try database.execute(
                 sql: "UPDATE pending_requests SET body = ? WHERE id = ?",
                 arguments: [updatedBody, id.uuidString]
+            )
+        }
+    }
+
+    private func expireRequest(id: UUID) throws {
+        try database.write { database in
+            guard let body = try Data.fetchOne(
+                database,
+                sql: "SELECT body FROM pending_requests WHERE id = ?",
+                arguments: [id.uuidString]
+            ) else { return }
+            let request: PendingRequest = try decode(body)
+            var state = AgentHubState(requests: [id: request])
+            StateReducer.reduce(state: &state, event: .requestExpired(id: id))
+            guard let updated = state.requests[id], updated != request else { return }
+            try database.execute(
+                sql: "UPDATE pending_requests SET body = ? WHERE id = ?",
+                arguments: [try JSONEncoder.agentHub.encode(updated), id.uuidString]
             )
         }
     }

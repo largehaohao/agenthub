@@ -149,6 +149,7 @@ public actor CodexAdapter: AgentAdapter {
         case .cancel: result = .object(["decision": .string("cancel")])
         case .text(let text): result = .object(["text": .string(text)])
         case .choices(let choices): result = .object(["choices": .array(choices.map(JSONValue.string))])
+        case .answers: throw AdapterOperationError.unsupportedDecision
         }
         try await rpc.respond(id: .string(request.requestID), result: result)
     }

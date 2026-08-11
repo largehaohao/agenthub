@@ -542,6 +542,7 @@ public enum RequestDecision: Codable, Equatable, Sendable {
     case cancel
     case text(String)
     case choices([String])
+    case answers([[String]])
 }
 
 public enum JumpTarget: Codable, Equatable, Sendable {
@@ -557,6 +558,7 @@ public enum AgentEvent: Codable, Equatable, Sendable {
     case requestUpserted(PendingRequest)
     case requestResolutionStarted(id: UUID)
     case requestResolved(id: UUID, outcome: String)
+    case requestExpired(id: UUID)
     case envelopeUpserted(MessageEnvelope)
     case quotaUpserted(QuotaWindow)
     case adapterHealth(Provider, AdapterHealth)

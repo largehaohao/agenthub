@@ -71,6 +71,13 @@ public enum StateReducer {
             request.state = .resolved
             state.requests[id] = request
 
+        case .requestExpired(let id):
+            guard var request = state.requests[id], !isTerminal(request.state) else {
+                return
+            }
+            request.state = .expired
+            state.requests[id] = request
+
         case .envelopeUpserted(let envelope):
             state.envelopes[envelope.id] = envelope
 

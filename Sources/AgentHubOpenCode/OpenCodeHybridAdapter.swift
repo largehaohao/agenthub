@@ -25,6 +25,13 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     private var endpointsByID: [String: OpenCodeRuntimeEndpoint] = [:]
     private var directoryByNativeID: [String: String] = [:]
     private var launchedByClientRequestID: [String: ProviderSessionRef] = [:]
+    private var requestKindByID: [String: OpenCodeRequestKind] = [:]
+    private var relayTasks: [String: Task<Void, Never>] = [:]
+    private var eventRelayStarted = false
+    private var authoritativeRequestIDs = Set<UUID>()
+    private var lastEmittedRequests: [UUID: PendingRequest] = [:]
+    private var lastEmittedSessions: [UUID: AgentSession] = [:]
+    private var lastEmittedNodes: [UUID: AgentNode] = [:]
 
     public init(
         accountID: String = "local-default",
@@ -118,6 +125,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     public func reconcile() async throws -> AdapterSnapshot {
         try await refreshDiscoveredEndpoints()
         var candidatesByNativeID: [String: [SessionCandidate]] = [:]
+        var requestsByProviderID: [String: PendingRequest] = [:]
 
         for endpoint in endpointsByID.values.sorted(by: { $0.id < $1.id })
         where endpoint.summary.connected {
@@ -165,9 +173,51 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
                         )
                     )
                 }
+                for permission in try await client.permissions(directory: nil) {
+                    guard let directory = directoryByNativeID[permission.sessionID] else { continue }
+                    await registry.observe(
+                        sessionID: permission.sessionID,
+                        directory: directory,
+                        endpointID: endpoint.id,
+                        at: now()
+                    )
+                    requestKindByID[permission.id] = .permission
+                    requestsByProviderID[permission.id] = makePermissionRequest(permission)
+                }
+                for question in try await client.questions(directory: nil) {
+                    guard let directory = directoryByNativeID[question.sessionID] else { continue }
+                    await registry.observe(
+                        sessionID: question.sessionID,
+                        directory: directory,
+                        endpointID: endpoint.id,
+                        at: now()
+                    )
+                    requestKindByID[question.id] = .question
+                    requestsByProviderID[question.id] = makeQuestionRequest(question)
+                }
             } catch {
-                markEndpointDisconnected(endpoint.id)
+                await markEndpointDisconnected(endpoint.id)
             }
+        }
+
+        for endpoint in endpointsByID.values
+        where !endpoint.summary.connected
+            && endpoint.summary.message == "authenticationRequired" {
+            let requestID = "authenticate:\(endpoint.id)"
+            requestsByProviderID[requestID] = PendingRequest(
+                id: stableOpenCodeUUID(accountID: accountID, nativeID: "request:\(requestID)"),
+                provider: .openCode,
+                providerRequestID: requestID,
+                sessionID: stableOpenCodeUUID(accountID: accountID, nativeID: "endpoint:\(endpoint.id)"),
+                threadID: endpoint.id,
+                kind: .authentication,
+                title: "OpenCode authentication required",
+                detail: endpoint.summary.baseURL,
+                allowedActions: ["authenticate"],
+                state: .pending,
+                reliability: .l1,
+                createdAt: now()
+            )
         }
 
         let newestByNativeID = candidatesByNativeID.compactMapValues {
@@ -222,17 +272,36 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             )
         }.sorted { $0.lastActivityAt > $1.lastActivityAt }
 
+        let requests = requestsByProviderID.values.sorted {
+            $0.providerRequestID < $1.providerRequestID
+        }
+        authoritativeRequestIDs = Set(requests.map(\.id))
+        if eventRelayStarted {
+            startRelaysForHealthyEndpoints()
+        }
         return AdapterSnapshot(
             sessions: sessions,
             nodes: nodes,
-            requests: [],
+            requests: requests,
             quotas: [],
-            endpoints: endpointsByID.values.map(\.summary).sorted { $0.id < $1.id }
+            endpoints: endpointsByID.values.map(\.summary).sorted { $0.id < $1.id },
+            requestsAreAuthoritative: true
         )
     }
 
     public func eventStream() async -> AsyncStream<AgentEvent> {
-        events
+        if !eventRelayStarted {
+            eventRelayStarted = true
+            startRelaysForHealthyEndpoints()
+        }
+        return events
+    }
+
+    public func shutdown() async {
+        for task in relayTasks.values { task.cancel() }
+        relayTasks.removeAll()
+        eventContinuation.finish()
+        await managedServer.stop()
     }
 
     public func recentTurns(
@@ -261,7 +330,52 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         _ request: ProviderRequestRef,
         decision: RequestDecision
     ) async throws {
-        throw OpenCodeAdapterError.staleRoute
+        guard request.provider == .openCode,
+              let directory = directoryByNativeID[request.threadID],
+              let route = await registry.route(
+                sessionID: request.threadID,
+                directory: directory,
+                operation: .resolveRequest
+              ),
+              let kind = requestKindByID[request.requestID] else {
+            throw OpenCodeAdapterError.staleRoute
+        }
+        let api = try client(for: route)
+        do {
+            switch kind {
+            case .permission:
+                let reply: OpenCodePermissionReply
+                switch decision {
+                case .accept: reply = .once
+                case .acceptForSession: reply = .always
+                case .decline, .cancel: reply = .reject
+                case .text, .choices, .answers:
+                    throw AdapterOperationError.unsupportedDecision
+                }
+                try await api.replyPermission(
+                    id: request.requestID,
+                    reply: reply,
+                    message: nil,
+                    directory: directory
+                )
+            case .question:
+                let answers: [[String]]
+                switch decision {
+                case .answers(let ordered): answers = ordered
+                case .choices(let choices): answers = [choices]
+                case .text(let text): answers = [[text]]
+                case .accept, .acceptForSession, .decline, .cancel:
+                    throw AdapterOperationError.unsupportedDecision
+                }
+                try await api.replyQuestion(
+                    id: request.requestID,
+                    answers: answers,
+                    directory: directory
+                )
+            }
+        } catch OpenCodeHTTPError.alreadyResolved {
+            throw AdapterOperationError.requestAlreadyResolved
+        }
     }
 
     public func jumpTarget(for session: ProviderSessionRef) async -> JumpTarget {
@@ -405,6 +519,11 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         let preview: [VisibleTurn]
     }
 
+    private enum OpenCodeRequestKind {
+        case permission
+        case question
+    }
+
     private func refreshDiscoveredEndpoints() async throws {
         for discovered in try await discovery.discover() {
             let endpoint: OpenCodeRuntimeEndpoint
@@ -483,6 +602,57 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         }
     }
 
+    private func makePermissionRequest(
+        _ permission: OpenCodePermissionRequest
+    ) -> PendingRequest {
+        PendingRequest(
+            id: stableOpenCodeUUID(
+                accountID: accountID,
+                nativeID: "request:\(permission.id)"
+            ),
+            provider: .openCode,
+            providerRequestID: permission.id,
+            sessionID: stableOpenCodeUUID(accountID: accountID, nativeID: permission.sessionID),
+            threadID: permission.sessionID,
+            kind: .permission,
+            title: "OpenCode permission request",
+            detail: ([permission.permission] + permission.patterns).joined(separator: " · "),
+            allowedActions: ["once", "always", "reject"],
+            state: .pending,
+            reliability: .l1,
+            createdAt: now()
+        )
+    }
+
+    private func makeQuestionRequest(_ question: OpenCodeQuestionRequest) -> PendingRequest {
+        PendingRequest(
+            id: stableOpenCodeUUID(
+                accountID: accountID,
+                nativeID: "request:\(question.id)"
+            ),
+            provider: .openCode,
+            providerRequestID: question.id,
+            sessionID: stableOpenCodeUUID(accountID: accountID, nativeID: question.sessionID),
+            threadID: question.sessionID,
+            kind: .choice,
+            title: "OpenCode question",
+            detail: question.questions.map(\.header).joined(separator: " · "),
+            allowedActions: ["answer", "cancel"],
+            fields: question.questions.enumerated().map { index, field in
+                RequestField(
+                    id: String(index),
+                    prompt: field.question,
+                    choices: field.options.map(\.label),
+                    allowsMultiple: field.multiple ?? false,
+                    allowsFreeText: field.custom ?? false
+                )
+            },
+            state: .pending,
+            reliability: .l1,
+            createdAt: now()
+        )
+    }
+
     private func mapStatus(_ status: OpenCodeSessionStatus?) -> SessionStatus {
         switch status?.type.lowercased() {
         case "busy", "retry": .working
@@ -517,13 +687,91 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         }.joined(separator: " · ")
     }
 
-    private func markEndpointDisconnected(_ id: String) {
+    private func startRelaysForHealthyEndpoints() {
+        for endpoint in endpointsByID.values
+        where endpoint.summary.connected && relayTasks[endpoint.id] == nil {
+            let endpointID = endpoint.id
+            relayTasks[endpointID] = Task { await self.runRelay(endpointID: endpointID) }
+        }
+    }
+
+    private func runRelay(endpointID: String) async {
+        let delays = [1, 2, 4, 8, 16, 32, 60]
+        var delayIndex = 0
+        while !Task.isCancelled {
+            guard let endpoint = endpointsByID[endpointID] else { return }
+            do {
+                let api = try client(for: endpoint)
+                let stream = await api.events(directory: nil)
+                for try await event in stream {
+                    try Task.checkCancellation()
+                    guard isRecognized(event) else { continue }
+                    try await relayReconciliation()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                // Reconnect below after marking only this endpoint unhealthy.
+            }
+            if Task.isCancelled { return }
+            await markEndpointDisconnected(endpointID)
+            do {
+                try await Task.sleep(for: .seconds(delays[min(delayIndex, delays.count - 1)]))
+                delayIndex = min(delayIndex + 1, delays.count - 1)
+                guard var retryEndpoint = endpointsByID[endpointID] else { return }
+                let health = try await client(for: retryEndpoint).health()
+                guard health.healthy else { continue }
+                retryEndpoint.summary.connected = true
+                retryEndpoint.summary.version = health.version
+                retryEndpoint.summary.message = nil
+                retryEndpoint.summary.lastSeenAt = now()
+                endpointsByID[endpointID] = retryEndpoint
+                await registry.upsert(retryEndpoint)
+                try await relayReconciliation()
+                delayIndex = 0
+            } catch is CancellationError {
+                return
+            } catch {
+                continue
+            }
+        }
+    }
+
+    private func relayReconciliation() async throws {
+        let previousRequestIDs = authoritativeRequestIDs
+        let snapshot = try await reconcile()
+        let currentRequestIDs = Set(snapshot.requests.map(\.id))
+        for id in previousRequestIDs.subtracting(currentRequestIDs) {
+            eventContinuation.yield(.requestExpired(id: id))
+            lastEmittedRequests.removeValue(forKey: id)
+        }
+        for request in snapshot.requests where lastEmittedRequests[request.id] != request {
+            eventContinuation.yield(.requestUpserted(request))
+            lastEmittedRequests[request.id] = request
+        }
+        for session in snapshot.sessions where lastEmittedSessions[session.id] != session {
+            eventContinuation.yield(.sessionUpserted(session))
+            lastEmittedSessions[session.id] = session
+        }
+        for node in snapshot.nodes where lastEmittedNodes[node.id] != node {
+            eventContinuation.yield(.nodeUpserted(node))
+            lastEmittedNodes[node.id] = node
+        }
+    }
+
+    private func isRecognized(_ event: OpenCodeEvent) -> Bool {
+        ["session.", "message.", "permission.", "question."].contains {
+            event.type.hasPrefix($0)
+        }
+    }
+
+    private func markEndpointDisconnected(_ id: String) async {
         guard var endpoint = endpointsByID[id] else { return }
         endpoint.summary.connected = false
         endpoint.summary.message = "unavailable"
         endpoint.summary.lastSeenAt = now()
         endpointsByID[id] = endpoint
-        Task { await registry.upsert(endpoint) }
+        await registry.upsert(endpoint)
     }
 
     private func date(milliseconds: Int64) -> Date {
