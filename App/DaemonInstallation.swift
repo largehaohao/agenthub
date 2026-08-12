@@ -8,6 +8,7 @@ struct DaemonInstallationPaths: Equatable {
     /// beside the daemon and never referenced from the LaunchAgent plist.
     let claudeHookExecutable: URL
     let claudeStatusLineExecutable: URL
+    let cursorHookExecutable: URL
     let plist: URL
     let standardOutput: URL
     let standardError: URL
@@ -36,6 +37,7 @@ enum DaemonInstallation {
             claudeHookExecutable: support.appendingPathComponent("bin/agenthub-claude-hook"),
             claudeStatusLineExecutable: support
                 .appendingPathComponent("bin/agenthub-claude-statusline"),
+            cursorHookExecutable: support.appendingPathComponent("bin/agenthub-cursor-hook"),
             plist: home.appendingPathComponent("Library/LaunchAgents/\(label).plist"),
             standardOutput: logs.appendingPathComponent("agenthubd.log"),
             standardError: logs.appendingPathComponent("agenthubd.error.log")
@@ -80,6 +82,7 @@ enum DaemonInstallation {
         helper: URL,
         claudeHook: URL? = nil,
         claudeStatusLine: URL? = nil,
+        cursorHook: URL? = nil,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         pathEnvironment: String = ProcessInfo.processInfo.environment["PATH"]
             ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -91,12 +94,16 @@ enum DaemonInstallation {
         let statusLine = claudeStatusLine
             ?? helper.deletingLastPathComponent()
                 .appendingPathComponent("agenthub-claude-statusline")
+        let cursor = cursorHook
+            ?? helper.deletingLastPathComponent()
+                .appendingPathComponent("agenthub-cursor-hook")
         let paths = paths(home: home)
 
         try stageHelpers(
             daemon: helper,
             claudeHook: hook,
             claudeStatusLine: statusLine,
+            cursorHook: cursor,
             home: home,
             fileManager: fileManager
         )
@@ -132,17 +139,17 @@ enum DaemonInstallation {
         try runLaunchctl(["kickstart", "-k", "\(domain)/\(label)"])
     }
 
-    /// Stages both helpers together. Both are validated before either is
-    /// copied, so a missing hook bridge cannot leave a half-installed runtime
-    /// where the daemon runs but Claude sessions are never observed.
+    /// Stages helpers together. Every helper is validated before any is copied,
+    /// so a missing bridge cannot leave a half-installed runtime.
     static func stageHelpers(
         daemon: URL,
         claudeHook: URL,
         claudeStatusLine: URL,
+        cursorHook: URL,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         fileManager: FileManager = .default
     ) throws {
-        for helper in [daemon, claudeHook, claudeStatusLine] {
+        for helper in [daemon, claudeHook, claudeStatusLine, cursorHook] {
             guard fileManager.isExecutableFile(atPath: helper.path) else {
                 throw DaemonInstallationError.helperMissing
             }
@@ -171,6 +178,12 @@ enum DaemonInstallation {
         try stageCopy(
             from: claudeStatusLine,
             to: paths.claudeStatusLineExecutable,
+            mode: 0o700,
+            fileManager: fileManager
+        )
+        try stageCopy(
+            from: cursorHook,
+            to: paths.cursorHookExecutable,
             mode: 0o700,
             fileManager: fileManager
         )

@@ -88,6 +88,17 @@ final class DaemonInstallationTests: XCTestCase {
         )
     }
 
+    func testCursorHookHelperInstallsBesideTheDaemon() {
+        let paths = DaemonInstallation.paths(
+            home: URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        )
+
+        XCTAssertEqual(
+            paths.cursorHookExecutable.path,
+            "/Users/tester/Library/Application Support/AgentHub/bin/agenthub-cursor-hook"
+        )
+    }
+
     func testInstallStagesBothHelpersAsExecutable() throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -100,11 +111,15 @@ final class DaemonInstallationTests: XCTestCase {
         let statusLine = try makeFakeExecutable(
             at: bundled.appendingPathComponent("agenthub-claude-statusline")
         )
+        let cursorHook = try makeFakeExecutable(
+            at: bundled.appendingPathComponent("agenthub-cursor-hook")
+        )
 
         try DaemonInstallation.stageHelpers(
             daemon: daemon,
             claudeHook: hook,
             claudeStatusLine: statusLine,
+            cursorHook: cursorHook,
             home: home
         )
 
@@ -113,6 +128,7 @@ final class DaemonInstallationTests: XCTestCase {
             paths.executable,
             paths.claudeHookExecutable,
             paths.claudeStatusLineExecutable,
+            paths.cursorHookExecutable,
         ] {
             XCTAssertTrue(
                 FileManager.default.isExecutableFile(atPath: helper.path),
@@ -133,12 +149,16 @@ final class DaemonInstallationTests: XCTestCase {
         let statusLine = try makeFakeExecutable(
             at: bundled.appendingPathComponent("agenthub-claude-statusline")
         )
+        let cursorHook = try makeFakeExecutable(
+            at: bundled.appendingPathComponent("agenthub-cursor-hook")
+        )
 
         XCTAssertThrowsError(
             try DaemonInstallation.stageHelpers(
                 daemon: daemon,
                 claudeHook: missing,
                 claudeStatusLine: statusLine,
+                cursorHook: cursorHook,
                 home: home
             )
         )

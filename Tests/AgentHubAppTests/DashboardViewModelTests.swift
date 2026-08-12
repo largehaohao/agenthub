@@ -80,6 +80,34 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(model.state.components["claude:hooks"], component)
     }
 
+    func testConfigureCursorSendsExplicitSetupActionAndStoresComponents() async {
+        let fixture = DashboardFixture()
+        let component = ProviderComponentStatus(
+            provider: .cursor,
+            component: "hooks",
+            available: true,
+            version: nil,
+            path: "/tmp/agenthub-cursor-hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            configureReply: .components([component])
+        )
+        let model = DashboardViewModel(client: client)
+        await model.connect()
+
+        await model.configure(provider: .cursor, action: .installHooks)
+
+        let commands = await client.recordedCommands
+        XCTAssertTrue(commands.contains {
+            if case .configureProvider(.cursor, .installHooks) = $0 { return true }
+            return false
+        })
+        XCTAssertEqual(model.state.components["cursor:hooks"], component)
+    }
+
     func testInstallQuotaReporterRequiresExplicitViewModelAction() async {
         let fixture = DashboardFixture()
         let component = ProviderComponentStatus(

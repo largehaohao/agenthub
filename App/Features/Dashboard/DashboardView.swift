@@ -6,6 +6,7 @@ struct DashboardView: View {
     @State private var showingLaunch = false
     @State private var showingOpenCodeSettings = false
     @State private var showingClaudeSettings = false
+    @State private var showingCursorSettings = false
 
     init(client: any DaemonClientProtocol) {
         _model = StateObject(wrappedValue: DashboardViewModel(client: client))
@@ -86,6 +87,11 @@ struct DashboardView: View {
                 } label: {
                     Label("Claude Settings", systemImage: "sparkles")
                 }
+                Button {
+                    showingCursorSettings = true
+                } label: {
+                    Label("Cursor Settings", systemImage: "macwindow")
+                }
             }
         }
         .sheet(isPresented: $showingLaunch) {
@@ -117,6 +123,16 @@ struct DashboardView: View {
                     .sorted { $0.component < $1.component },
                 onConfigure: { action in
                     await model.configure(provider: .claude, action: action)
+                }
+            )
+        }
+        .sheet(isPresented: $showingCursorSettings) {
+            CursorSettingsView(
+                components: model.state.components.values
+                    .filter { $0.provider == .cursor }
+                    .sorted { $0.component < $1.component },
+                onConfigure: { action in
+                    await model.configure(provider: .cursor, action: action)
                 }
             )
         }

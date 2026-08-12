@@ -4,6 +4,7 @@ import Foundation
 import AgentHubClaude
 import AgentHubCodex
 import AgentHubCore
+import AgentHubCursor
 import AgentHubDaemon
 import AgentHubIPC
 import AgentHubOpenCode
@@ -89,6 +90,19 @@ private func resolvedClaudeStatusLineInstaller() -> ClaudeStatusLineInstaller? {
     return ClaudeStatusLineInstaller(
         settingsURL: home.appendingPathComponent(".claude/settings.json"),
         executableURL: reporter
+    )
+}
+
+private func resolvedCursorHookInstaller() -> CursorHookInstaller? {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let helper = home.appendingPathComponent(
+        "Library/Application Support/AgentHub/bin/agenthub-cursor-hook"
+    )
+    guard FileManager.default.isExecutableFile(atPath: helper.path) else { return nil }
+
+    return CursorHookInstaller(
+        hooksURL: home.appendingPathComponent(".cursor/hooks.json"),
+        executableURL: helper
     )
 }
 
@@ -181,10 +195,15 @@ private func runDaemon(paths: DaemonPaths) async throws {
         hookInstaller: resolvedClaudeHookInstaller(),
         statusLineInstaller: resolvedClaudeStatusLineInstaller()
     )
+    let cursorAdapter = CursorAdapter(
+        accountID: "default",
+        hookInstaller: resolvedCursorHookInstaller()
+    )
     let adapters: [Provider: any AgentAdapter] = [
         .codex: codexAdapter,
         .openCode: openCodeAdapter,
         .claude: claudeAdapter,
+        .cursor: cursorAdapter,
     ]
     let coordinator = Coordinator(store: store, adapters: adapters)
     let requestService = RequestService(store: store, adapters: adapters)
