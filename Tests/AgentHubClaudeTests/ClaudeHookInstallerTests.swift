@@ -61,7 +61,8 @@ final class ClaudeHookInstallerTests: XCTestCase {
         for event in ClaudeHookInstaller.observedEvents {
             let commands = agentHubCommands(in: settings, event: event)
             XCTAssertEqual(commands.count, 1, "expected exactly one hook for \(event)")
-            XCTAssertEqual(commands.first, executableURL.path)
+            // Claude runs hooks through a shell, so the path is always quoted.
+            XCTAssertEqual(commands.first, "'\(executableURL.path)'")
         }
     }
 
@@ -232,6 +233,87 @@ final class ClaudeHookInstallerTests: XCTestCase {
         XCTAssertFalse(status.available)
     }
 
+    // MARK: - Paths containing spaces
+
+    /// Claude runs hook commands through a shell, so an unquoted
+    /// `.../Application Support/...` path splits on the space and exits 127.
+    /// The real helper lives in Application Support, so this is the live path.
+    func testInstallQuotesExecutablePathsContainingSpaces() throws {
+        let spaced = URL(
+            fileURLWithPath: "/Users/test/Library/Application Support/AgentHub/bin/agenthub-claude-hook"
+        )
+        let installer = ClaudeHookInstaller(
+            settingsURL: settingsURL,
+            executableURL: spaced,
+            now: { Date(timeIntervalSince1970: 1) }
+        )
+
+        try installer.install()
+
+        let settings = try readSettings()
+        for event in ClaudeHookInstaller.observedEvents {
+            let commands = allCommands(in: settings, event: event)
+            XCTAssertEqual(commands.count, 1, "expected exactly one hook for \(event)")
+            XCTAssertEqual(
+                commands.first,
+                "'\(spaced.path)'",
+                "hook command for \(event) must be single-quoted"
+            )
+        }
+    }
+
+    func testStatusAndUninstallRecognizeQuotedCommands() throws {
+        let spaced = URL(
+            fileURLWithPath: "/Users/test/Library/Application Support/AgentHub/bin/agenthub-claude-hook"
+        )
+        let installer = ClaudeHookInstaller(
+            settingsURL: settingsURL,
+            executableURL: spaced,
+            now: { Date(timeIntervalSince1970: 1) }
+        )
+
+        try installer.install()
+        XCTAssertTrue(try installer.status().available, "quoted install must report installed")
+
+        try installer.install()
+        XCTAssertEqual(
+            allCommands(in: try readSettings(), event: "SessionStart").count,
+            1,
+            "reinstall must not duplicate a quoted entry"
+        )
+
+        try installer.uninstall()
+        XCTAssertTrue(
+            allCommands(in: try readSettings(), event: "SessionStart").isEmpty,
+            "uninstall must remove its own quoted entry"
+        )
+    }
+
+    /// A legacy unquoted entry from a prior install must still be recognized as
+    /// AgentHub's, so reinstalling replaces it instead of accumulating both.
+    func testInstallReplacesLegacyUnquotedEntry() throws {
+        let spaced = URL(
+            fileURLWithPath: "/Users/test/Library/Application Support/AgentHub/bin/agenthub-claude-hook"
+        )
+        try writeSettings([
+            "hooks": [
+                "SessionStart": [
+                    ["hooks": [["type": "command", "command": spaced.path]]],
+                ],
+            ],
+        ])
+        let installer = ClaudeHookInstaller(
+            settingsURL: settingsURL,
+            executableURL: spaced,
+            now: { Date(timeIntervalSince1970: 1) }
+        )
+
+        try installer.install()
+
+        let commands = allCommands(in: try readSettings(), event: "SessionStart")
+        XCTAssertEqual(commands, ["'\(spaced.path)'"])
+    }
+
     // MARK: - Helpers
 
     private func installer() -> ClaudeHookInstaller { makeInstaller() }
@@ -266,7 +348,8 @@ final class ClaudeHookInstallerTests: XCTestCase {
         event: String
     ) -> [[String: Any]] {
         entries(in: settings, event: event).filter {
-            ($0["command"] as? String) == executableURL.path
+            guard let command = $0["command"] as? String else { return false }
+            return ClaudeHookInstaller.executablePath(fromCommand: command) == executableURL.path
         }
     }
 
@@ -275,7 +358,9 @@ final class ClaudeHookInstallerTests: XCTestCase {
     }
 
     private func thirdPartyCommands(in settings: [String: Any], event: String) -> [String] {
-        allCommands(in: settings, event: event).filter { $0 != executableURL.path }
+        allCommands(in: settings, event: event).filter { command in
+            ClaudeHookInstaller.executablePath(fromCommand: command) != executableURL.path
+        }
     }
 
     private func allCommands(in settings: [String: Any], event: String) -> [String] {

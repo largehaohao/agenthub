@@ -145,19 +145,75 @@ public struct ClaudeHookInstaller: Sendable {
     private func hookEntry() -> [String: Any] {
         [
             "type": "command",
-            "command": executableURL.path,
+            "command": Self.shellQuoted(executableURL.path),
             "async": true,
             "timeout": Self.hookTimeoutSeconds,
         ]
     }
 
+    /// Claude runs hook commands through a shell, so a helper under
+    /// `~/Library/Application Support/...` splits on its space and exits 127
+    /// unless the path is quoted.
+    static func shellQuoted(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     private func isOwned(_ entry: [String: Any]) -> Bool {
-        guard let command = entry["command"] as? String else { return false }
-        let normalized = URL(fileURLWithPath: command)
+        guard let command = entry["command"] as? String,
+              let executable = Self.executablePath(
+                  fromCommand: command,
+                  matching: ownedCommand
+              ) else { return false }
+        let normalized = URL(fileURLWithPath: executable)
             .standardizedFileURL
             .resolvingSymlinksInPath()
             .path
         return normalized == ownedCommand
+    }
+
+    /// Resolves a command to the bare executable path AgentHub may own.
+    ///
+    /// A fully quoted path is unwrapped, and a legacy unquoted entry written
+    /// before quoting is still recognized so reinstalling replaces it rather
+    /// than accumulating a broken duplicate. An argument-bearing command never
+    /// matches: `<ours> --flag` belongs to whoever added the flag, so returning
+    /// its first token would let uninstall delete a third-party hook.
+    /// - Parameter owned: when supplied, an unquoted command equal to this exact
+    ///   path is accepted even though it contains spaces. That is the legacy
+    ///   `Application Support` entry written before quoting. Any longer command
+    ///   sharing that prefix carries arguments and is left alone.
+    static func executablePath(
+        fromCommand command: String,
+        matching owned: String? = nil
+    ) -> String? {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let quoted = Self.fullyQuotedPath(trimmed, delimiter: "'")
+            ?? Self.fullyQuotedPath(trimmed, delimiter: "\"") {
+            return quoted
+        }
+
+        // A legacy unquoted entry is ours only when it equals our path exactly.
+        if let owned, trimmed == owned { return trimmed }
+
+        // Otherwise only a bare, argument-free path can be ours.
+        guard !trimmed.contains(where: { $0.isWhitespace }) else { return nil }
+        return trimmed
+    }
+
+    /// Returns the path only when the quotes wrap the entire command, so a
+    /// quoted path followed by arguments is not claimed.
+    private static func fullyQuotedPath(
+        _ command: String,
+        delimiter: Character
+    ) -> String? {
+        guard command.first == delimiter, command.last == delimiter, command.count >= 2 else {
+            return nil
+        }
+        let path = String(command.dropFirst().dropLast())
+        guard !path.isEmpty, !path.contains(delimiter) else { return nil }
+        return path
     }
 
     private func ownedEntries(

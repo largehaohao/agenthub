@@ -106,6 +106,6 @@ final class ClaudeAdapterConfigurationTests: XCTestCase {
         return matchers
             .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
             .compactMap { $0["command"] as? String }
-            .filter { $0 == executableURL.path }
+            .filter { ClaudeHookInstaller.executablePath(fromCommand: $0) == executableURL.path }
     }
 }
