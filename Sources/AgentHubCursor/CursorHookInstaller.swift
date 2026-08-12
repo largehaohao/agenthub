@@ -53,8 +53,14 @@ public struct CursorHookInstaller: Sendable {
         self.now = now
     }
 
-    private var ownedCommand: String {
+    private var ownedPath: String {
         executableURL.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// Cursor runs hook commands through a shell. Paths with spaces must be
+    /// single-quoted (OpenIsland style) or failClosed decision hooks exit 127.
+    private var ownedCommand: String {
+        "'\(ownedPath)'"
     }
 
     public func status() throws -> ProviderComponentStatus {
@@ -130,12 +136,40 @@ public struct CursorHookInstaller: Sendable {
 
     private func isOwned(_ entry: [String: Any]) -> Bool {
         guard let command = entry["command"] as? String else { return false }
-        // Exact absolute helper path only — argument-bearing peers are foreign.
-        let normalized = URL(fileURLWithPath: command)
+        // Match the helper executable only — argument-bearing peers are foreign.
+        guard let executable = Self.executablePath(fromCommand: command) else {
+            return false
+        }
+        let normalized = URL(fileURLWithPath: executable)
             .standardizedFileURL
             .resolvingSymlinksInPath()
             .path
-        return normalized == ownedCommand
+        return normalized == ownedPath
+    }
+
+    /// Extracts the first shell token from a Cursor hook command, stripping
+    /// surrounding single or double quotes used for paths with spaces.
+    static func executablePath(fromCommand command: String) -> String? {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let quoted = Self.quotedToken(trimmed, delimiter: "'")
+            ?? Self.quotedToken(trimmed, delimiter: "\"") {
+            return quoted
+        }
+
+        let token = trimmed.split(
+            whereSeparator: { $0.isWhitespace }
+        ).first.map(String.init)
+        return token.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private static func quotedToken(_ command: String, delimiter: Character) -> String? {
+        guard command.first == delimiter else { return nil }
+        let rest = command.dropFirst()
+        guard let end = rest.firstIndex(of: delimiter) else { return nil }
+        let path = String(rest[..<end])
+        return path.isEmpty ? nil : path
     }
 
     private func ownedEntries(

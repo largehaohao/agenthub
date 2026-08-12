@@ -35,7 +35,7 @@ AgentHub installs Cursor hooks only when you ask it to, from **Cursor Settings**
 in the app. Installation merges AgentHub's entries into your existing
 `~/.cursor/hooks.json` and leaves OpenIsland and other hooks untouched;
 removal deletes only hook commands whose resolved path is exactly AgentHub's
-helper.
+helper. Hook commands are single-quoted because Application Support paths contain spaces.
 
 The helper lives at:
 
