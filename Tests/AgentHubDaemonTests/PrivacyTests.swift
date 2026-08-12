@@ -5,6 +5,7 @@ import AgentHubPersistence
 import AgentHubTestSupport
 @testable import AgentHubClaude
 @testable import AgentHubCodex
+@testable import AgentHubCursor
 @testable import AgentHubDaemon
 @testable import AgentHubOpenCode
 
@@ -204,5 +205,58 @@ extension PrivacyTests {
         XCTAssertFalse(bytes.contains(Data("raw-secret-command".utf8)))
         XCTAssertFalse(bytes.contains(Data("ANTHROPIC_API_KEY".utf8)))
         XCTAssertFalse(bytes.contains(Data("hook_event_name".utf8)))
+    }
+
+    /// A Cursor hook carries the user's real tool input. Raw hook JSON must not
+    /// reach persistent state; only the bounded preview may appear on requests.
+    func testPersistedStateDoesNotContainRawCursorHookPayload() async throws {
+        let secretCommand = "raw-secret-cursor-command --token CURSOR_SECRET_VALUE"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentHubCursorPrivacy-\(UUID().uuidString)")
+        let databaseURL = directory.appendingPathComponent("agenthub.sqlite")
+        let store = try AgentHubStore(databaseURL: databaseURL)
+        let adapter = CursorAdapter(
+            accountID: "default",
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let coordinator = Coordinator(store: store, adapters: [.cursor: adapter])
+        try await coordinator.start()
+
+        let payload: [String: Any] = [
+            "hook_event_name": "beforeShellExecution",
+            "conversation_id": "conv-privacy-1",
+            "generation_id": "gen-privacy-1",
+            "session_id": "conv-privacy-1",
+            "workspace_roots": ["/Users/example/repo"],
+            "command": secretCommand,
+            "cwd": "/Users/example/repo",
+        ]
+        try await coordinator.ingest(
+            try ProviderHookEnvelope(
+                provider: .cursor,
+                rawJSON: try JSONSerialization.data(withJSONObject: payload),
+                sourcePID: 43,
+                ancestors: [
+                    ProcessObservation(
+                        pid: 43,
+                        parentPID: 42,
+                        uid: 501,
+                        tty: "ttys002",
+                        command: "cursor"
+                    ),
+                ],
+                observedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+        )
+
+        let snapshot = try await store.snapshot()
+        XCTAssertEqual(snapshot.requests.count, 1)
+        let request = try XCTUnwrap(snapshot.requests.values.first)
+        XCTAssertEqual(request.detail, secretCommand)
+
+        let bytes = try Data(contentsOf: databaseURL)
+        XCTAssertFalse(bytes.contains(Data("hook_event_name".utf8)))
+        XCTAssertFalse(bytes.contains(Data("workspace_roots".utf8)))
+        XCTAssertFalse(bytes.contains(Data("generation_id".utf8)))
     }
 }

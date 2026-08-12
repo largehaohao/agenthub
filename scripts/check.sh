@@ -19,11 +19,12 @@ HELPERS_DIR=.build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers
 HELPER_PATH="$HELPERS_DIR/agenthubd"
 CLAUDE_HOOK_PATH="$HELPERS_DIR/agenthub-claude-hook"
 CLAUDE_STATUSLINE_PATH="$HELPERS_DIR/agenthub-claude-statusline"
+CURSOR_HOOK_PATH="$HELPERS_DIR/agenthub-cursor-hook"
 
-# All helpers ship together: without the hook bridge, Claude sessions started
+# All helpers ship together: without the hook bridges, provider sessions started
 # outside AgentHub are never observed, and without the status-line reporter no
-# usage can be collected.
-for helper in "$HELPER_PATH" "$CLAUDE_HOOK_PATH" "$CLAUDE_STATUSLINE_PATH"; do
+# Claude usage can be collected.
+for helper in "$HELPER_PATH" "$CLAUDE_HOOK_PATH" "$CLAUDE_STATUSLINE_PATH" "$CURSOR_HOOK_PATH"; do
   if [[ ! -x "$helper" ]]; then
     print -u2 -- "missing embedded helper: $helper"
     exit 1
@@ -75,5 +76,27 @@ fi
 if rg -n '"statusLine"' Sources App \
   | rg -v '^Sources/AgentHubClaude/ClaudeStatusLineInstaller\.swift:' >/dev/null; then
   print -u2 -- "Only ClaudeStatusLineInstaller may write the statusLine key"
+  exit 1
+fi
+
+# Cursor hooks.json belongs to the user. Only the installer may write that file,
+# so a stray writer cannot silently replace their own hooks.
+if rg -n '\.cursor/hooks\.json|root\["hooks"\]' Sources/AgentHubCursor App Sources/agenthubd \
+  | rg -v '^Sources/AgentHubCursor/CursorHookInstaller\.swift:' \
+  | rg -v '^Sources/agenthubd/main\.swift:' \
+  | rg -v 'App/Features/Cursor/CursorSettingsView\.swift:' >/dev/null; then
+  print -u2 -- "Only CursorHookInstaller may mutate ~/.cursor/hooks.json"
+  exit 1
+fi
+
+# Cursor access tokens stay in process memory only.
+if rg -n 'accessToken|WorkosCursorSessionToken' Sources \
+  | rg -v '^Sources/AgentHubCursor/CursorLoginSessionReader\.swift:' \
+  | rg -v '^Sources/AgentHubCursor/CursorQuotaClient\.swift:' >/dev/null; then
+  print -u2 -- "Cursor token literals are confined to the login reader and quota client"
+  exit 1
+fi
+if rg -n 'accessToken|WorkosCursorSessionToken' App >/dev/null; then
+  print -u2 -- "Cursor token literals must not appear in App persistence paths"
   exit 1
 fi

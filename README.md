@@ -4,7 +4,7 @@ AgentHub is a native macOS control center for coding-agent sessions. It uses a
 user-scoped background daemon and a local Unix socket, so session state and
 requests remain available when the window is closed.
 
-The current desktop slice supports Codex, OpenCode, and Claude end to end:
+The current desktop slice supports Codex, OpenCode, Claude, and Cursor end to end:
 
 - discover and launch Codex sessions, including visible subagents;
 - show session status, pending approval/input requests, and quota windows;
@@ -23,6 +23,12 @@ The current desktop slice supports Codex, OpenCode, and Claude end to end:
 - surface Claude permissions, questions, subagents, and background tasks, and
   answer them only after revalidating the exact live prompt;
 - show Claude subscription usage collected from Claude Code itself.
+- observe Cursor IDE Agent Chat sessions through user-level hooks you install
+  explicitly;
+- surface Cursor tool permissions, answer them only after revalidating the live
+  prompt, and jump to the recorded workspace;
+- show Cursor subscription usage after you authorize reading the local login
+  session (the token is never stored in AgentHub's database).
 
 Claude usage comes from Claude Code's own status line, which reports real
 five-hour and weekly limits. Press **Install Usage Reporter** in Claude Settings
@@ -33,11 +39,14 @@ requests, jumps, and handoffs all work normally and only the usage strip is
 empty. Usage older than 15 minutes stays visible but is marked stale and is
 excluded from pacing recommendations.
 
-A Cursor provider slice is planned. OpenCode Go does not expose a supported
-quota source yet, so AgentHub displays that limitation explicitly instead of
-estimating a balance. Claude Desktop does not expose a session identifier
-through Accessibility, so Desktop rows activate Claude rather than answering a
-window AgentHub cannot verify.
+Cursor sessions are discovered through hooks only; there is no managed launch.
+Handoffs to Cursor are clipboard-and-jump. Usage requires explicit
+authorization and reads the local Cursor login session into process memory only.
+
+OpenCode Go does not expose a supported quota source yet, so AgentHub displays
+that limitation explicitly instead of estimating a balance. Claude Desktop does
+not expose a session identifier through Accessibility, so Desktop rows activate
+Claude rather than answering a window AgentHub cannot verify.
 
 ## Requirements
 
@@ -66,6 +75,11 @@ Claude tests use fixtures only: they never submit a prompt, read real
 transcripts, or modify your Claude settings. See
 [Claude testing](docs/claude-testing.md) for the opt-in flags and the hook
 install/uninstall behavior.
+
+Cursor tests use fixtures only: they never read real Cursor auth, call live
+usage APIs, or modify your `~/.cursor/hooks.json`. See
+[Cursor testing](docs/cursor-testing.md) for boundaries and authorization
+behavior.
 
 For build, launch, installation, service inspection, fixture mode, live testing,
 privacy, and uninstall commands, see [Development and operations](docs/development.md).
