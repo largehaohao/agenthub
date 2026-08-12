@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "AgentHubSecurity", targets: ["AgentHubSecurity"]),
         .library(name: "AgentHubOpenCode", targets: ["AgentHubOpenCode"]),
         .library(name: "AgentHubClaude", targets: ["AgentHubClaude"]),
+        .library(name: "AgentHubCursor", targets: ["AgentHubCursor"]),
         .library(name: "AgentHubDaemon", targets: ["AgentHubDaemon"]),
         .library(name: "AgentHubTestSupport", targets: ["AgentHubTestSupport"]),
         .executable(name: "agenthubd", targets: ["agenthubd"]),
@@ -53,6 +54,7 @@ let package = Package(
             linkerSettings: [.linkedFramework("Security")]
         ),
         .target(name: "AgentHubClaude", dependencies: ["AgentHubCore", "AgentHubIPC"]),
+        .target(name: "AgentHubCursor", dependencies: ["AgentHubCore"]),
         .target(
             name: "AgentHubDaemon",
             dependencies: [
@@ -119,6 +121,10 @@ let package = Package(
         .testTarget(
             name: "AgentHubClaudeTests",
             dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubTestSupport"]
+        ),
+        .testTarget(
+            name: "AgentHubCursorTests",
+            dependencies: ["AgentHubCursor", "AgentHubCore", "AgentHubTestSupport"]
         ),
         .testTarget(
             name: "AgentHubPersistenceTests",

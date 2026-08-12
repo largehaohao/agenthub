@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "subagentStart",
+  "conversation_id": "conv-fixture-1",
+  "generation_id": "gen-4",
+  "session_id": "conv-fixture-1",
+  "workspace_roots": ["/Users/example/repo"],
+  "subagent_id": "sub-1",
+  "subagent_type": "explore",
+  "parent_conversation_id": "conv-fixture-1"
+}

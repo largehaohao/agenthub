@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "beforeMCPExecution",
+  "conversation_id": "conv-fixture-1",
+  "generation_id": "gen-3",
+  "session_id": "conv-fixture-1",
+  "workspace_roots": ["/Users/example/repo"],
+  "tool_name": "browser_navigate",
+  "tool_input": "{\"url\":\"https://example.com/secret-path\"}",
+  "url": "https://example.mcp.local"
+}

@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "beforeShellExecution",
+  "conversation_id": "conv-fixture-1",
+  "generation_id": "gen-2",
+  "session_id": "conv-fixture-1",
+  "workspace_roots": ["/Users/example/repo"],
+  "command": "gh pr create --title secret-should-truncate",
+  "cwd": "/Users/example/repo",
+  "sandbox": false
+}
