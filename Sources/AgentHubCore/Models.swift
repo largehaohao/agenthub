@@ -53,6 +53,25 @@ public struct ProviderHookEnvelope: Codable, Equatable, Sendable {
         self.ancestors = ancestors
         self.observedAt = observedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case rawJSON
+        case sourcePID
+        case ancestors
+        case observedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            provider: container.decode(Provider.self, forKey: .provider),
+            rawJSON: container.decode(Data.self, forKey: .rawJSON),
+            sourcePID: container.decode(Int32.self, forKey: .sourcePID),
+            ancestors: container.decode([ProcessObservation].self, forKey: .ancestors),
+            observedAt: container.decode(Date.self, forKey: .observedAt)
+        )
+    }
 }
 
 public struct ProviderComponentStatus: Codable, Equatable, Identifiable, Sendable {

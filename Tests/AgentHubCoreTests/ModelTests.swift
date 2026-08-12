@@ -4,6 +4,25 @@ import XCTest
 import AgentHubTestSupport
 
 final class ModelTests: XCTestCase {
+    func testProviderHookEnvelopeDecodingRejectsMoreThan256KiB() throws {
+        let encoded = try JSONSerialization.data(withJSONObject: [
+            "provider": "claude",
+            "rawJSON": Data(
+                repeating: 1,
+                count: ProviderHookEnvelope.maximumPayloadBytes + 1
+            ).base64EncodedString(),
+            "sourcePID": 42,
+            "ancestors": [],
+            "observedAt": "1970-01-01T00:00:01Z",
+        ])
+
+        XCTAssertThrowsError(
+            try JSONDecoder.agentHub.decode(ProviderHookEnvelope.self, from: encoded)
+        ) { error in
+            XCTAssertEqual(error as? ProviderHookEnvelopeError, .oversizedPayload)
+        }
+    }
+
     func testProviderHookEnvelopeRejectsMoreThan256KiB() {
         XCTAssertThrowsError(try ProviderHookEnvelope(
             provider: .claude,
