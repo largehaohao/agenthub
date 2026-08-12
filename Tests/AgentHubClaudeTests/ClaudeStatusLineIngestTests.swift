@@ -77,6 +77,29 @@ final class ClaudeStatusLineIngestTests: XCTestCase {
         XCTAssertEqual(snapshot.quotas.count, 2)
     }
 
+    /// Claude stops reporting `five_hour` once that window resets, while still
+    /// sending `seven_day`. Replacing the whole set dropped the 5h row, and the
+    /// daemon then pruned it from the strip entirely.
+    func testPartialRateLimitsKeepUnreportedWindow() async throws {
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+        try await adapter.ingest(statusLineEnvelope())
+
+        try await adapter.ingest(try envelope(Data("""
+        {"session_id":"abc123","rate_limits":{
+        "seven_day":{"used_percentage":43,
+        "resets_at":"2026-08-17T00:00:00Z"}}}
+        """.utf8)))
+
+        let snapshot = try await adapter.reconcile()
+        XCTAssertEqual(snapshot.quotas.count, 2, "5h window must survive")
+        let byID = Dictionary(uniqueKeysWithValues: snapshot.quotas.map { ($0.windowID, $0) })
+        XCTAssertEqual(byID["five_hour"]?.usedPercent, 42.5, "kept at its last real value")
+        XCTAssertEqual(byID["seven_day"]?.usedPercent, 43, "updated to the new reading")
+    }
+
     private func statusLineEnvelope(
         fiveHourPercent: Double = 42.5
     ) throws -> ProviderHookEnvelope {

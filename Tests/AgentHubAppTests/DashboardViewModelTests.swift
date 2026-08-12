@@ -196,6 +196,47 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(QuotaPresentation(window: window, now: now).title, "5h")
     }
 
+    /// A window whose reset time has passed is showing a number from a window
+    /// that no longer exists, so it must not read as a current figure.
+    func testElapsedWindowIsMarkedExpired() throws {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let window = try QuotaWindow(
+            provider: .claude,
+            accountID: "a",
+            windowID: "five_hour",
+            label: "Session",
+            usedPercent: 55,
+            windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 10_000),
+            fetchedAt: Date(timeIntervalSince1970: 19_900),
+            source: "claude-statusline"
+        )
+
+        let item = QuotaPresentation(window: window, now: now)
+
+        XCTAssertTrue(item.hasElapsed)
+        XCTAssertFalse(item.informsRecommendations)
+    }
+
+    func testCurrentWindowIsNotMarkedExpired() throws {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let window = try QuotaWindow(
+            provider: .claude,
+            accountID: "a",
+            windowID: "five_hour",
+            usedPercent: 55,
+            windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 30_000),
+            fetchedAt: Date(timeIntervalSince1970: 19_900),
+            source: "claude-statusline"
+        )
+
+        let item = QuotaPresentation(window: window, now: now)
+
+        XCTAssertFalse(item.hasElapsed)
+        XCTAssertTrue(item.informsRecommendations)
+    }
+
     func testQuotaRowsGroupByProviderAndSortShortestWindowFirst() throws {
         let now = Date(timeIntervalSince1970: 1_100)
         let fetched = Date(timeIntervalSince1970: 1_000)

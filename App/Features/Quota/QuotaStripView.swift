@@ -81,15 +81,21 @@ private struct QuotaWindowView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Text(window.title).font(.caption.bold())
-                if window.isStale {
+                if window.hasElapsed {
+                    Text("ENDED").font(.caption2.bold()).foregroundStyle(.secondary)
+                } else if window.isStale {
                     Text("STALE").font(.caption2.bold()).foregroundStyle(.orange)
                 }
             }
             ProgressView(value: window.usedPercent, total: 100)
-                .tint(tint)
+                .tint(window.hasElapsed ? .gray : tint)
                 .frame(width: 140)
-                .opacity(window.isStale ? 0.5 : 1)
-            Text("\(Int(window.usedPercent))% used · resets \(window.resetsAt, style: .relative)")
+                .opacity(window.informsRecommendations ? 1 : 0.5)
+            // An elapsed window's reset time is in the past, so "resets in ..."
+            // would read as a countdown that already fired.
+            Text(window.hasElapsed
+                 ? "\(Int(window.usedPercent))% used · window ended"
+                 : "\(Int(window.usedPercent))% used · resets \(window.resetsAt, style: .relative)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

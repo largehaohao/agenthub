@@ -111,13 +111,17 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         // no `hook_event_name`; it reports usage rather than a lifecycle change.
         if ClaudeStatusLineDecoder.looksLikeStatusLine(envelope.rawJSON) {
             let report = try statusLineDecoder.decode(envelope.rawJSON)
-            // An empty report means Claude sent no limits this time; the last
-            // real reading is kept rather than blanked.
-            if !report.windows.isEmpty {
-                quotas = report.windows
-                for window in report.windows {
-                    emit(.quotaUpserted(window))
+            // Merge per window rather than replacing the set. Claude stops
+            // reporting `five_hour` once that window resets while still sending
+            // `seven_day`, and replacing would drop the 5h reading the user can
+            // still see. An empty report likewise keeps the last real values.
+            for window in report.windows {
+                if let existing = quotas.firstIndex(where: { $0.id == window.id }) {
+                    quotas[existing] = window
+                } else {
+                    quotas.append(window)
                 }
+                emit(.quotaUpserted(window))
             }
             return
         }

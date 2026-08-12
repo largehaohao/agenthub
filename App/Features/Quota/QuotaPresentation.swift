@@ -13,6 +13,10 @@ struct QuotaPresentation: Identifiable, Equatable {
     let resetsAt: Date
     let source: String
     let isStale: Bool
+    /// The window's reset time has passed, so this percentage describes a window
+    /// that no longer exists. Claude stops reporting a window once it resets, so
+    /// the last reading is retained but must not read as current.
+    let hasElapsed: Bool
 
     init(window: QuotaWindow, now: Date) {
         // Providers name the same window differently ("Session", "Weekly",
@@ -27,10 +31,13 @@ struct QuotaPresentation: Identifiable, Equatable {
         resetsAt = window.resetsAt
         source = window.source
         isStale = window.isStale(now: now)
+        hasElapsed = window.resetsAt <= now
     }
 
-    /// Stale numbers stay visible but must never drive a recommendation.
-    var informsRecommendations: Bool { !isStale }
+    /// Stale or elapsed numbers stay visible but must never drive a
+    /// recommendation. This mirrors `QuotaWindow.availablePace`, which already
+    /// returns nil in both cases.
+    var informsRecommendations: Bool { !isStale && !hasElapsed }
 
     static func durationLabel(_ duration: TimeInterval) -> String {
         QuotaWindow.durationLabel(duration)
