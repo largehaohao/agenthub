@@ -4,6 +4,18 @@ import XCTest
 import AgentHubTestSupport
 
 final class ModelTests: XCTestCase {
+    func testProviderHookEnvelopeRejectsMoreThan256KiB() {
+        XCTAssertThrowsError(try ProviderHookEnvelope(
+            provider: .claude,
+            rawJSON: Data(repeating: 1, count: 256 * 1_024 + 1),
+            sourcePID: 42,
+            ancestors: [],
+            observedAt: Date()
+        )) { error in
+            XCTAssertEqual(error as? ProviderHookEnvelopeError, .oversizedPayload)
+        }
+    }
+
     func testLaunchRequestDefaultsProviderOptionsToNil() {
         let request = LaunchRequest(
             clientRequestID: "request-1",

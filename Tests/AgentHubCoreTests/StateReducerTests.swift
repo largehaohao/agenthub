@@ -3,6 +3,23 @@ import XCTest
 import AgentHubTestSupport
 
 final class StateReducerTests: XCTestCase {
+    func testComponentUpsertUsesProviderAndComponentIdentity() {
+        var state = AgentHubState.empty
+        let status = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: true,
+            version: "2.1.228",
+            path: "/tmp/agenthub-claude-hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+
+        StateReducer.reduce(state: &state, event: .componentUpserted(status))
+
+        XCTAssertEqual(state.components["claude:hooks"], status)
+    }
+
     func testResolvedRequestNeverReturnsToResolving() {
         var state = AgentHubState.empty
         let request = PendingRequest.fixture(state: .pending)

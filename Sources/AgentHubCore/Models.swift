@@ -7,6 +7,129 @@ public enum Provider: String, Codable, CaseIterable, Sendable {
     case openCode
 }
 
+public struct ProcessObservation: Codable, Equatable, Sendable {
+    public let pid: Int32
+    public let parentPID: Int32
+    public let uid: UInt32
+    public let tty: String?
+    public let command: String
+
+    public init(pid: Int32, parentPID: Int32, uid: UInt32, tty: String?, command: String) {
+        self.pid = pid
+        self.parentPID = parentPID
+        self.uid = uid
+        self.tty = tty
+        self.command = command
+    }
+}
+
+public enum ProviderHookEnvelopeError: Error, Equatable, Sendable {
+    case oversizedPayload
+}
+
+public struct ProviderHookEnvelope: Codable, Equatable, Sendable {
+    public static let maximumPayloadBytes = 256 * 1_024
+
+    public let provider: Provider
+    public let rawJSON: Data
+    public let sourcePID: Int32
+    public let ancestors: [ProcessObservation]
+    public let observedAt: Date
+
+    public init(
+        provider: Provider,
+        rawJSON: Data,
+        sourcePID: Int32,
+        ancestors: [ProcessObservation],
+        observedAt: Date
+    ) throws {
+        guard rawJSON.count <= Self.maximumPayloadBytes else {
+            throw ProviderHookEnvelopeError.oversizedPayload
+        }
+
+        self.provider = provider
+        self.rawJSON = rawJSON
+        self.sourcePID = sourcePID
+        self.ancestors = ancestors
+        self.observedAt = observedAt
+    }
+}
+
+public struct ProviderComponentStatus: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { "\(provider.rawValue):\(component)" }
+
+    public let provider: Provider
+    public let component: String
+    public let available: Bool
+    public let version: String?
+    public let path: String?
+    public let message: String?
+    public let changedAt: Date
+
+    public init(
+        provider: Provider,
+        component: String,
+        available: Bool,
+        version: String?,
+        path: String?,
+        message: String?,
+        changedAt: Date
+    ) {
+        self.provider = provider
+        self.component = component
+        self.available = available
+        self.version = version
+        self.path = path
+        self.message = message
+        self.changedAt = changedAt
+    }
+}
+
+public enum ProviderConfigurationAction: String, Codable, Sendable {
+    case installHooks, uninstallHooks, refreshComponents
+}
+
+public enum NativeInteractionOperation: Codable, Equatable, Sendable {
+    case choose(label: String)
+    case enter(text: String)
+}
+
+public struct NativeInteractionPlan: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let provider: Provider
+    public let requestID: UUID
+    public let bundleID: String
+    public let windowHint: String?
+    public let sessionNativeID: String
+    public let promptFingerprint: String
+    public let operation: NativeInteractionOperation
+
+    public init(
+        id: UUID,
+        provider: Provider,
+        requestID: UUID,
+        bundleID: String,
+        windowHint: String?,
+        sessionNativeID: String,
+        promptFingerprint: String,
+        operation: NativeInteractionOperation
+    ) {
+        self.id = id
+        self.provider = provider
+        self.requestID = requestID
+        self.bundleID = bundleID
+        self.windowHint = windowHint
+        self.sessionNativeID = sessionNativeID
+        self.promptFingerprint = promptFingerprint
+        self.operation = operation
+    }
+}
+
+public enum RequestResolutionRoute: Codable, Equatable, Sendable {
+    case provider
+    case native(NativeInteractionPlan)
+}
+
 public enum ReliabilityLevel: Int, Codable, Comparable, Sendable {
     case l1 = 1
     case l2 = 2
@@ -564,6 +687,7 @@ public enum AgentEvent: Codable, Equatable, Sendable {
     case adapterHealth(Provider, AdapterHealth)
     case endpointUpserted(ProviderEndpoint)
     case endpointRemoved(String)
+    case componentUpserted(ProviderComponentStatus)
 }
 
 public struct AdapterHealth: Codable, Equatable, Sendable {

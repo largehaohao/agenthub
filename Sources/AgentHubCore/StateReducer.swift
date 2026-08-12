@@ -8,6 +8,7 @@ public struct AgentHubState: Equatable, Codable, Sendable {
     public var quotas: [String: QuotaWindow]
     public var adapterHealth: [Provider: AdapterHealth]
     public var endpoints: [String: ProviderEndpoint]
+    public var components: [String: ProviderComponentStatus]
 
     public init(
         sessions: [UUID: AgentSession] = [:],
@@ -16,7 +17,8 @@ public struct AgentHubState: Equatable, Codable, Sendable {
         envelopes: [UUID: MessageEnvelope] = [:],
         quotas: [String: QuotaWindow] = [:],
         adapterHealth: [Provider: AdapterHealth] = [:],
-        endpoints: [String: ProviderEndpoint] = [:]
+        endpoints: [String: ProviderEndpoint] = [:],
+        components: [String: ProviderComponentStatus] = [:]
     ) {
         self.sessions = sessions
         self.nodes = nodes
@@ -25,6 +27,7 @@ public struct AgentHubState: Equatable, Codable, Sendable {
         self.quotas = quotas
         self.adapterHealth = adapterHealth
         self.endpoints = endpoints
+        self.components = components
     }
 
     public static let empty = AgentHubState()
@@ -99,6 +102,9 @@ public enum StateReducer {
 
         case .endpointRemoved(let id):
             state.endpoints.removeValue(forKey: id)
+
+        case .componentUpserted(let component):
+            state.components[component.id] = component
         }
     }
 

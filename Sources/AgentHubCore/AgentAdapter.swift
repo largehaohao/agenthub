@@ -16,7 +16,28 @@ public protocol AgentAdapter: Sendable {
         _ request: ProviderRequestRef,
         decision: RequestDecision
     ) async throws
+    func resolutionRoute(
+        _ request: ProviderRequestRef,
+        decision: RequestDecision
+    ) async throws -> RequestResolutionRoute
     func jumpTarget(for session: ProviderSessionRef) async -> JumpTarget
+}
+
+public extension AgentAdapter {
+    func resolutionRoute(
+        _ request: ProviderRequestRef,
+        decision: RequestDecision
+    ) async throws -> RequestResolutionRoute {
+        .provider
+    }
+}
+
+public protocol HookEventIngestingAdapter: AgentAdapter {
+    func ingest(_ envelope: ProviderHookEnvelope) async throws
+}
+
+public protocol ProviderConfigurableAdapter: AgentAdapter {
+    func configure(_ action: ProviderConfigurationAction) async throws
 }
 
 public protocol EndpointConfigurableAdapter: AgentAdapter {

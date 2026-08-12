@@ -61,6 +61,8 @@ public actor AgentHubStore {
                     arguments: [id]
                 )
             }
+        case .componentUpserted:
+            break
         }
     }
 
