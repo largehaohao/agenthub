@@ -100,6 +100,13 @@ public actor DaemonAPI {
                 )
                 try await coordinator.refreshFromStore()
                 return .completed
+
+            case .awaitHookPermission(let requestID, let timeoutMilliseconds):
+                let decision = await requests.awaitHookPermission(
+                    requestID: requestID,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+                return .hookPermission(decision)
             }
         } catch {
             return .failure(publicFailure(for: command))
@@ -120,6 +127,7 @@ public actor DaemonAPI {
         case .ingestProviderHook: "Unable to ingest provider hook"
         case .configureProvider(let provider, _): "Unable to configure \(provider.rawValue)"
         case .nativeInteractionStarted: "Unable to record native interaction"
+        case .awaitHookPermission: "Unable to await hook permission"
         }
     }
 }

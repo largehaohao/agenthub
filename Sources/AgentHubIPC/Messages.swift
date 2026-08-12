@@ -32,6 +32,7 @@ public enum DaemonCommand: Codable, Sendable {
     case ingestProviderHook(ProviderHookEnvelope)
     case configureProvider(Provider, ProviderConfigurationAction)
     case nativeInteractionStarted(requestID: UUID, planID: UUID)
+    case awaitHookPermission(requestID: UUID, timeoutMilliseconds: Int)
 }
 
 public enum DaemonReply: Codable, Equatable, Sendable {
@@ -42,6 +43,7 @@ public enum DaemonReply: Codable, Equatable, Sendable {
     case jump(JumpTarget)
     case components([ProviderComponentStatus])
     case nativeInteraction(NativeInteractionPlan)
+    case hookPermission(HookPermissionDecision)
     case failure(String)
 }
 

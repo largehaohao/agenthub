@@ -107,6 +107,12 @@ public struct ProviderComponentStatus: Codable, Equatable, Identifiable, Sendabl
 public enum ProviderConfigurationAction: String, Codable, Sendable {
     case installHooks, uninstallHooks, refreshComponents
     case installQuotaReporter, uninstallQuotaReporter
+    case authorizeQuotaAccess, revokeQuotaAccess
+}
+
+/// Decision returned to a synchronous Cursor (or similar) permission hook.
+public enum HookPermissionDecision: String, Codable, Sendable {
+    case allow, deny, ask
 }
 
 public enum NativeInteractionOperation: Codable, Equatable, Sendable {

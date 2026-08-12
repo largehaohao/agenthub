@@ -1,31 +1,17 @@
 import Foundation
+import AgentHubIPC
 
 /// Resolves the daemon socket for the one-shot Claude helpers.
 ///
-/// macOS derives Application Support from the user record rather than `HOME`,
-/// so without an explicit override there is no way to point a helper at a test
-/// daemon — the only reachable socket would be the user's live one. The
-/// override exists so real delivery can be verified against a throwaway daemon.
+/// Delegates to `DaemonSocketPath` so Cursor and Claude helpers share one
+/// override contract (`AGENTHUB_SOCKET`).
 public enum ClaudeHelperSocket {
-    public static let overrideVariable = "AGENTHUB_SOCKET"
+    public static let overrideVariable = DaemonSocketPath.overrideVariable
 
     public static func resolve(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
     ) throws -> String {
-        if let override = environment[overrideVariable], !override.isEmpty {
-            return override
-        }
-
-        let applicationSupport = try fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        )
-        return applicationSupport
-            .appendingPathComponent("AgentHub", isDirectory: true)
-            .appendingPathComponent("agenthub.sock")
-            .path
+        try DaemonSocketPath.resolve(environment: environment, fileManager: fileManager)
     }
 }

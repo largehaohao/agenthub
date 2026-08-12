@@ -248,6 +248,8 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             }
             try statusLineInstaller.uninstall()
             return [refreshStatusLineComponent()]
+        case .authorizeQuotaAccess, .revokeQuotaAccess:
+            throw ClaudeAdapterError.unsupportedCapability
         case .installHooks, .uninstallHooks, .refreshComponents:
             break
         }
@@ -273,7 +275,8 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             try hookInstaller.install()
         case .uninstallHooks:
             try hookInstaller.uninstall()
-        case .refreshComponents, .installQuotaReporter, .uninstallQuotaReporter:
+        case .refreshComponents, .installQuotaReporter, .uninstallQuotaReporter,
+             .authorizeQuotaAccess, .revokeQuotaAccess:
             break
         }
 

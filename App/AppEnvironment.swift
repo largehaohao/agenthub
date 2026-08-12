@@ -255,6 +255,8 @@ private actor FixtureDaemonClient: DaemonClientProtocol {
             return .completed
         case .configureProvider:
             return .components(Array(state.components.values))
+        case .awaitHookPermission:
+            return .hookPermission(.ask)
         }
     }
 

@@ -197,4 +197,15 @@ final class ModelTests: XCTestCase {
         let data = try JSONEncoder.agentHub.encode(window)
         XCTAssertEqual(try JSONDecoder.agentHub.decode(QuotaWindow.self, from: data), window)
     }
+
+    func testAuthorizeQuotaAccessIsDistinctFromInstallQuotaReporter() {
+        XCTAssertNotEqual(
+            ProviderConfigurationAction.authorizeQuotaAccess,
+            .installQuotaReporter
+        )
+        XCTAssertNotEqual(
+            ProviderConfigurationAction.revokeQuotaAccess,
+            .uninstallQuotaReporter
+        )
+    }
 }

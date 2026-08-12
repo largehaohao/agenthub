@@ -52,7 +52,7 @@ let package = Package(
             dependencies: ["AgentHubCore", "AgentHubSecurity"],
             linkerSettings: [.linkedFramework("Security")]
         ),
-        .target(name: "AgentHubClaude", dependencies: ["AgentHubCore"]),
+        .target(name: "AgentHubClaude", dependencies: ["AgentHubCore", "AgentHubIPC"]),
         .target(
             name: "AgentHubDaemon",
             dependencies: [

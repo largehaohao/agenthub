@@ -91,4 +91,17 @@ public actor RequestService {
             sessionID: nil
         ))
     }
+
+    /// Waits for a pending request to be resolved from AgentHub, or returns
+    /// `.ask` when the timeout elapses / the request is missing. Never returns
+    /// `.allow` by default. Task 4 replaces this stub with a continuation map.
+    public func awaitHookPermission(
+        requestID: UUID,
+        timeoutMilliseconds: Int
+    ) async -> HookPermissionDecision {
+        _ = requestID
+        let nanoseconds = UInt64(max(0, timeoutMilliseconds)) * 1_000_000
+        try? await Task.sleep(nanoseconds: min(nanoseconds, 50_000_000))
+        return .ask
+    }
 }
