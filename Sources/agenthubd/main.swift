@@ -168,10 +168,14 @@ private func runDaemon(paths: DaemonPaths) async throws {
             await api.handle(command)
         }
         writeLog("ipc ready")
+        // `changes()` is one shared stream, so a second consumer would steal
+        // events from the relay. Both effects are driven from this one loop.
+        let reconciler = DeliveryReconciler(handoffs: handoffService)
         let relay = Task {
             let changes = await coordinator.changes()
             for await sequence in changes {
                 await server.broadcast(.stateChanged(sequence: sequence))
+                await reconciler.reconcile(await coordinator.snapshot())
             }
         }
 
