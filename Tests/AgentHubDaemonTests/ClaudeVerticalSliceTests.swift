@@ -64,6 +64,55 @@ final class ClaudeVerticalSliceTests: XCTestCase {
         XCTAssertEqual(snapshot.components[status.id], status)
     }
 
+    func testQuotaHelperSetupIsRoutedAsItsOwnAction() async throws {
+        let context = try await makeContext(start: true)
+        let status = ProviderComponentStatus(
+            provider: .claude,
+            component: "codexbar",
+            available: false,
+            version: nil,
+            path: nil,
+            message: "CodexBar is not installed, so Claude usage is unavailable.",
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        await context.adapter.setComponents([status])
+
+        let reply = await context.api.handle(.configureProvider(.claude, .installQuotaHelper))
+
+        guard case .components(let components) = reply else {
+            return XCTFail("expected component status")
+        }
+        XCTAssertEqual(components, [status])
+        let actions = await context.adapter.configureActions()
+        XCTAssertEqual(actions, [.installQuotaHelper])
+    }
+
+    func testUnavailableQuotaSourceLeavesSessionsAndRequestsUntouched() async throws {
+        let context = try await makeContext(start: true)
+        // A quota source that is missing entirely must not disturb the session
+        // and request state that arrived through hooks.
+        _ = await context.api.handle(.ingestProviderHook(hook()))
+        let before = try await context.store.snapshot()
+
+        await context.adapter.setComponents([
+            ProviderComponentStatus(
+                provider: .claude,
+                component: "codexbar",
+                available: false,
+                version: nil,
+                path: nil,
+                message: "CodexBar could not report Claude usage.",
+                changedAt: Date(timeIntervalSince1970: 2)
+            ),
+        ])
+        _ = await context.api.handle(.configureProvider(.claude, .refreshQuota))
+
+        let after = try await context.store.snapshot()
+        XCTAssertEqual(after.sessions, before.sessions)
+        XCTAssertEqual(after.requests, before.requests)
+        XCTAssertFalse(after.components["claude:codexbar"]?.available ?? true)
+    }
+
     func testNativeRequestRemainsPendingUntilAppStartsMatchingPlan() async throws {
         let context = try await makeContext()
         let request = PendingRequest.fixture(state: .pending, provider: .claude)

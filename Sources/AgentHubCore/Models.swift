@@ -106,6 +106,7 @@ public struct ProviderComponentStatus: Codable, Equatable, Identifiable, Sendabl
 
 public enum ProviderConfigurationAction: String, Codable, Sendable {
     case installHooks, uninstallHooks, refreshComponents
+    case installQuotaHelper, refreshQuota
 }
 
 public enum NativeInteractionOperation: Codable, Equatable, Sendable {
