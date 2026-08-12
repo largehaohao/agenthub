@@ -58,6 +58,15 @@ let package = Package(
             ]
         ),
         .target(name: "AgentHubTestSupport", dependencies: ["AgentHubCore"]),
+        .target(
+            name: "AgentHubOpenCodeTestSupport",
+            dependencies: [
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ],
+            path: "Tests/AgentHubOpenCodeTestSupport"
+        ),
         .executableTarget(
             name: "agenthubd",
             dependencies: [
@@ -84,6 +93,7 @@ let package = Package(
                 "AgentHubCore",
                 "AgentHubOpenCode",
                 "AgentHubSecurity",
+                "AgentHubOpenCodeTestSupport",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -110,6 +120,9 @@ let package = Package(
                 "AgentHubIPC",
                 "AgentHubPersistence",
                 "AgentHubTestSupport",
+                "AgentHubOpenCode",
+                "AgentHubSecurity",
+                "AgentHubOpenCodeTestSupport",
             ]
         ),
     ]

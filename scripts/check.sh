@@ -15,8 +15,17 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   test
 
-if otool -l .build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers/agenthubd \
+HELPER_PATH=.build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers/agenthubd
+
+if otool -l "$HELPER_PATH" \
   | rg -q '/\.build/xcode/'; then
   print -u2 -- "embedded agenthubd must not link to Xcode build products"
   exit 1
 fi
+
+for module in AgentHubOpenCode AgentHubSecurity; do
+  if ! strings "$HELPER_PATH" | rg "$module" >/dev/null; then
+    print -u2 -- "embedded agenthubd is missing statically linked $module"
+    exit 1
+  fi
+done

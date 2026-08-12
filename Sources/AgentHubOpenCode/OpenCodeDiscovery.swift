@@ -340,20 +340,18 @@ struct MacOpenCodeSnapshotter: Sendable {
         try await Task.detached {
             let process = Process()
             let output = Pipe()
-            let errors = Pipe()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
             process.standardOutput = output
-            process.standardError = errors
+            process.standardError = output
             try process.run()
-            process.waitUntilExit()
             let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             if process.terminationStatus != 0 {
-                let diagnostic = errors.fileHandleForReading.readDataToEndOfFile()
                 throw MacOpenCodeSnapshotError.commandFailed(
                     executable,
                     process.terminationStatus,
-                    String(decoding: diagnostic, as: UTF8.self)
+                    String(decoding: data, as: UTF8.self)
                 )
             }
             return String(decoding: data, as: UTF8.self)
