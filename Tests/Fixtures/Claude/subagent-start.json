@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "SubagentStart",
+  "session_id": "abc123",
+  "transcript_path": "/Users/example/.claude/projects/repo/abc123.jsonl",
+  "cwd": "/Users/example/repo",
+  "agent_id": "agent-abc123",
+  "agent_type": "Explore",
+  "description": "Survey the adapter packages"
+}

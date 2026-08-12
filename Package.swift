@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "AgentHubCodex", targets: ["AgentHubCodex"]),
         .library(name: "AgentHubSecurity", targets: ["AgentHubSecurity"]),
         .library(name: "AgentHubOpenCode", targets: ["AgentHubOpenCode"]),
+        .library(name: "AgentHubClaude", targets: ["AgentHubClaude"]),
         .library(name: "AgentHubDaemon", targets: ["AgentHubDaemon"]),
         .library(name: "AgentHubTestSupport", targets: ["AgentHubTestSupport"]),
         .executable(name: "agenthubd", targets: ["agenthubd"]),
@@ -46,6 +47,7 @@ let package = Package(
             dependencies: ["AgentHubCore", "AgentHubSecurity"],
             linkerSettings: [.linkedFramework("Security")]
         ),
+        .target(name: "AgentHubClaude", dependencies: ["AgentHubCore"]),
         .target(
             name: "AgentHubDaemon",
             dependencies: [
@@ -98,6 +100,10 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
             ]
+        ),
+        .testTarget(
+            name: "AgentHubClaudeTests",
+            dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubTestSupport"]
         ),
         .testTarget(
             name: "AgentHubPersistenceTests",

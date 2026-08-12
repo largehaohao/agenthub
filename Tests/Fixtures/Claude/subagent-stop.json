@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "SubagentStop",
+  "session_id": "abc123",
+  "transcript_path": "/Users/example/.claude/projects/repo/abc123.jsonl",
+  "cwd": "/Users/example/repo",
+  "agent_id": "agent-abc123",
+  "agent_type": "Explore"
+}

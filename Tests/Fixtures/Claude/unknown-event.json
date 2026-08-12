@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "FutureEvent",
+  "session_id": "abc123",
+  "transcript_path": "/Users/example/.claude/projects/repo/abc123.jsonl",
+  "cwd": "/Users/example/repo",
+  "future_field": { "nested": [1, 2, 3] }
+}
