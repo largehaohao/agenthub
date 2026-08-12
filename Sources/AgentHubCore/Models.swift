@@ -538,6 +538,12 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let provider: Provider
     public let accountID: String
+    /// Source-provided window key. A provider may report several windows that
+    /// share a duration (an overall five-hour window and a per-model one), so
+    /// this participates in `id` to keep them distinct.
+    public let windowID: String?
+    public let label: String?
+    public let plan: String?
     public let usedPercent: Double
     public let windowDuration: TimeInterval
     public let resetsAt: Date
@@ -547,6 +553,9 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
     public init(
         provider: Provider,
         accountID: String,
+        windowID: String? = nil,
+        label: String? = nil,
+        plan: String? = nil,
         usedPercent: Double,
         windowDuration: TimeInterval,
         resetsAt: Date,
@@ -560,9 +569,15 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
             throw ModelValidationError.nonPositiveWindowDuration
         }
 
-        self.id = "\(provider.rawValue):\(accountID):\(Int(windowDuration))"
+        // Unnamed windows keep the original identity so existing Codex rows
+        // continue to match after this field was introduced.
+        let base = "\(provider.rawValue):\(accountID):\(Int(windowDuration))"
+        self.id = windowID.map { "\(base):\($0)" } ?? base
         self.provider = provider
         self.accountID = accountID
+        self.windowID = windowID
+        self.label = label
+        self.plan = plan
         self.usedPercent = usedPercent
         self.windowDuration = windowDuration
         self.resetsAt = resetsAt

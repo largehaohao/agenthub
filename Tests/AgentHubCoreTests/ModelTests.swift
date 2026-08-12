@@ -105,4 +105,96 @@ final class ModelTests: XCTestCase {
             )
         )
     }
+
+    func testNamedQuotaWindowsWithSameDurationHaveDistinctIDs() throws {
+        let reset = Date(timeIntervalSince1970: 2_000)
+        let now = Date(timeIntervalSince1970: 1_000)
+        let overall = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "session",
+            label: "Session",
+            plan: "Pro",
+            usedPercent: 10,
+            windowDuration: 18_000,
+            resetsAt: reset,
+            fetchedAt: now,
+            source: "codexbar"
+        )
+        let sonnet = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "sonnet",
+            label: "Sonnet",
+            plan: "Pro",
+            usedPercent: 20,
+            windowDuration: 18_000,
+            resetsAt: reset,
+            fetchedAt: now,
+            source: "codexbar"
+        )
+
+        XCTAssertNotEqual(overall.id, sonnet.id)
+        XCTAssertEqual(overall.windowID, "session")
+        XCTAssertEqual(overall.label, "Session")
+        XCTAssertEqual(overall.plan, "Pro")
+    }
+
+    func testUnnamedQuotaWindowKeepsLegacyIdentity() throws {
+        let window = try QuotaWindow(
+            provider: .codex,
+            accountID: "personal",
+            usedPercent: 10,
+            windowDuration: 900,
+            resetsAt: .now,
+            fetchedAt: .now,
+            source: "codex-app-server"
+        )
+
+        XCTAssertEqual(window.id, "codex:personal:900")
+        XCTAssertNil(window.windowID)
+        XCTAssertNil(window.label)
+        XCTAssertNil(window.plan)
+    }
+
+    func testQuotaWindowDecodesRowsWrittenBeforeLabelsExisted() throws {
+        let legacy = Data("""
+        {
+          "id": "codex:personal:900",
+          "provider": "codex",
+          "accountID": "personal",
+          "usedPercent": 12.5,
+          "windowDuration": 900,
+          "resetsAt": "1970-01-01T00:16:40Z",
+          "fetchedAt": "1970-01-01T00:15:00Z",
+          "source": "codex-app-server"
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder.agentHub.decode(QuotaWindow.self, from: legacy)
+
+        XCTAssertEqual(decoded.id, "codex:personal:900")
+        XCTAssertEqual(decoded.usedPercent, 12.5)
+        XCTAssertNil(decoded.windowID)
+        XCTAssertNil(decoded.label)
+        XCTAssertNil(decoded.plan)
+    }
+
+    func testLabeledQuotaWindowRoundTripsThroughCoding() throws {
+        let window = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "weekly",
+            label: "Weekly",
+            plan: "Pro",
+            usedPercent: 40,
+            windowDuration: 604_800,
+            resetsAt: Date(timeIntervalSince1970: 5_000),
+            fetchedAt: Date(timeIntervalSince1970: 1_000),
+            source: "codexbar"
+        )
+
+        let data = try JSONEncoder.agentHub.encode(window)
+        XCTAssertEqual(try JSONDecoder.agentHub.decode(QuotaWindow.self, from: data), window)
+    }
 }

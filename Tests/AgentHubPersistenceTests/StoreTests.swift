@@ -17,6 +17,45 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(restored.envelopes.values.first?.state, .queued)
     }
 
+    func testNamedQuotaWindowsPersistSideBySide() async throws {
+        let url = temporaryDatabaseURL()
+        let store = try AgentHubStore(databaseURL: url)
+        let reset = Date(timeIntervalSince1970: 2_000)
+        let fetched = Date(timeIntervalSince1970: 1_000)
+        let session = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "session",
+            label: "Session",
+            plan: "Pro",
+            usedPercent: 10,
+            windowDuration: 18_000,
+            resetsAt: reset,
+            fetchedAt: fetched,
+            source: "codexbar"
+        )
+        let sonnet = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "sonnet",
+            label: "Sonnet",
+            plan: "Pro",
+            usedPercent: 20,
+            windowDuration: 18_000,
+            resetsAt: reset,
+            fetchedAt: fetched,
+            source: "codexbar"
+        )
+
+        try await store.apply(.quotaUpserted(session))
+        try await store.apply(.quotaUpserted(sonnet))
+
+        let restored = try await AgentHubStore(databaseURL: url).snapshot()
+        XCTAssertEqual(restored.quotas.count, 2)
+        XCTAssertEqual(restored.quotas[session.id], session)
+        XCTAssertEqual(restored.quotas[sonnet.id], sonnet)
+    }
+
     func testProviderComponentSurvivesRestart() async throws {
         let url = temporaryDatabaseURL()
         let store = try AgentHubStore(databaseURL: url)
