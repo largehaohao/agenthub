@@ -3,6 +3,7 @@ import XCTest
 import AgentHubCore
 import AgentHubPersistence
 import AgentHubTestSupport
+@testable import AgentHubClaude
 @testable import AgentHubCodex
 @testable import AgentHubDaemon
 @testable import AgentHubOpenCode
@@ -149,5 +150,59 @@ final class PrivacyTests: XCTestCase {
                 combined.append(try Data(contentsOf: file))
             }
         }
+    }
+}
+
+extension PrivacyTests {
+    /// A Claude hook carries the user's real tool input and may run in an
+    /// environment holding credentials. None of it may reach persistent state.
+    func testPersistedStateDoesNotContainRawClaudeHookOrEnvironment() async throws {
+        let secretCommand = "raw-secret-command --token ANTHROPIC_API_KEY_VALUE"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentHubClaudePrivacy-\(UUID().uuidString)")
+        let databaseURL = directory.appendingPathComponent("agenthub.sqlite")
+        let store = try AgentHubStore(databaseURL: databaseURL)
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+        let coordinator = Coordinator(store: store, adapters: [.claude: adapter])
+        try await coordinator.start()
+
+        let payload: [String: Any] = [
+            "hook_event_name": "PermissionRequest",
+            "session_id": "abc123",
+            "transcript_path": "/Users/example/.claude/projects/repo/abc123.jsonl",
+            "cwd": "/Users/example/repo",
+            "tool_name": "Bash",
+            "tool_input": ["command": secretCommand],
+            "permission_suggestions": ["Yes", "No"],
+        ]
+        try await coordinator.ingest(
+            try ProviderHookEnvelope(
+                provider: .claude,
+                rawJSON: try JSONSerialization.data(withJSONObject: payload),
+                sourcePID: 41,
+                ancestors: [
+                    ProcessObservation(
+                        pid: 41,
+                        parentPID: 40,
+                        uid: 501,
+                        tty: "ttys001",
+                        command: "claude"
+                    ),
+                ],
+                observedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+        )
+
+        // The request must exist; it simply must not carry the payload.
+        let snapshot = try await store.snapshot()
+        XCTAssertEqual(snapshot.requests.count, 1)
+
+        let bytes = try Data(contentsOf: databaseURL)
+        XCTAssertFalse(bytes.contains(Data("raw-secret-command".utf8)))
+        XCTAssertFalse(bytes.contains(Data("ANTHROPIC_API_KEY".utf8)))
+        XCTAssertFalse(bytes.contains(Data("hook_event_name".utf8)))
     }
 }

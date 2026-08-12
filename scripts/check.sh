@@ -15,7 +15,18 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   test
 
-HELPER_PATH=.build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers/agenthubd
+HELPERS_DIR=.build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers
+HELPER_PATH="$HELPERS_DIR/agenthubd"
+CLAUDE_HOOK_PATH="$HELPERS_DIR/agenthub-claude-hook"
+
+# Both helpers ship together: without the hook bridge, Claude sessions started
+# outside AgentHub are never observed.
+for helper in "$HELPER_PATH" "$CLAUDE_HOOK_PATH"; do
+  if [[ ! -x "$helper" ]]; then
+    print -u2 -- "missing embedded helper: $helper"
+    exit 1
+  fi
+done
 
 if otool -l "$HELPER_PATH" \
   | rg -q '/\.build/xcode/'; then
@@ -23,9 +34,29 @@ if otool -l "$HELPER_PATH" \
   exit 1
 fi
 
-for module in AgentHubOpenCode AgentHubSecurity; do
+for module in AgentHubOpenCode AgentHubSecurity AgentHubClaude; do
   if ! strings "$HELPER_PATH" | rg "$module" >/dev/null; then
     print -u2 -- "embedded agenthubd is missing statically linked $module"
     exit 1
   fi
 done
+
+# A launch prompt passed as a Claude process argument would be readable by any
+# local process. It must only ever travel through a tmux paste buffer.
+if rg -n -- '--session-id' Sources App \
+  | rg -v '^Sources/AgentHubClaude/ClaudeTerminalRuntime\.swift:' >/dev/null; then
+  print -u2 -- "Claude launch arguments must be built only in ClaudeTerminalRuntime"
+  exit 1
+fi
+
+if rg -n 'pasteLiteral|prompt' Sources/AgentHubClaude/ClaudeTerminalRuntime.swift \
+  | rg -q 'arguments:.*prompt'; then
+  print -u2 -- "Claude prompt text must never be passed as a process argument"
+  exit 1
+fi
+
+# Permission prompts are always answered by the user, never by policy.
+if rg -n -- '--dangerously-skip-permissions|bypassPermissions' Sources App >/dev/null; then
+  print -u2 -- "Claude permission bypass flags are not allowed"
+  exit 1
+fi
