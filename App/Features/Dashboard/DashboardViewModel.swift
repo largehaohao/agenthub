@@ -14,6 +14,7 @@ final class DashboardViewModel: ObservableObject {
     private let client: any DaemonClientProtocol
     private let jumpOpener: any JumpOpening
     private let credentials: any CredentialStoring
+    private let nativeExecutor: any NativeInteractionExecuting
     private let retryDelay: @Sendable (Int) -> Duration
     private var resolvingRequestIDs: Set<UUID> = []
     private var eventTask: Task<Void, Never>?
@@ -22,6 +23,9 @@ final class DashboardViewModel: ObservableObject {
         client: any DaemonClientProtocol,
         jumpOpener: any JumpOpening = WorkspaceJumpOpener(),
         credentials: any CredentialStoring = KeychainCredentialStore(),
+        nativeExecutor: any NativeInteractionExecuting = ClaudeNativeInteractionExecutor(
+            surface: AXClaudeAccessibilitySurface()
+        ),
         retryDelay: @escaping @Sendable (Int) -> Duration = { attempt in
             let delays = ReconnectSchedule.delays
             return .seconds(delays[min(attempt, delays.count - 1)])
@@ -30,6 +34,7 @@ final class DashboardViewModel: ObservableObject {
         self.client = client
         self.jumpOpener = jumpOpener
         self.credentials = credentials
+        self.nativeExecutor = nativeExecutor
         self.retryDelay = retryDelay
     }
 
@@ -158,6 +163,14 @@ final class DashboardViewModel: ObservableObject {
         resolvingRequestIDs.insert(id)
         do {
             let reply = try await client.send(.resolveRequest(id, decision))
+
+            // A native route means the daemon cannot act for us: the app must
+            // drive the provider's own UI and only then report it started.
+            if case .nativeInteraction(let plan) = reply {
+                await performNativeInteraction(plan, requestID: id)
+                return
+            }
+
             guard case .accepted = reply else {
                 resolvingRequestIDs.remove(id)
                 message = reply.failureMessage ?? "Unable to resolve request"
@@ -174,6 +187,55 @@ final class DashboardViewModel: ObservableObject {
         } catch {
             resolvingRequestIDs.remove(id)
             message = "Unable to resolve request"
+        }
+    }
+
+    /// Drives the provider's native UI, then tells the daemon the interaction
+    /// started. On any failure the request stays pending and the user is told
+    /// exactly what AgentHub could not do — no exact-jump claim after a
+    /// fallback.
+    private func performNativeInteraction(
+        _ plan: NativeInteractionPlan,
+        requestID: UUID
+    ) async {
+        do {
+            try await nativeExecutor.execute(plan)
+            _ = try await client.send(
+                .nativeInteractionStarted(requestID: requestID, planID: plan.id)
+            )
+            try await refresh()
+        } catch NativeInteractionError.accessibilityUnavailable {
+            message = "Claude was brought forward. Grant Accessibility to let "
+                + "AgentHub answer this request for you."
+        } catch NativeInteractionError.stalePrompt {
+            message = "Claude has moved on from this prompt. Answer it in Claude."
+        } catch NativeInteractionError.ambiguousTarget {
+            message = "More than one Claude window matched. Answer it in Claude."
+        } catch {
+            message = "AgentHub could not find this request in Claude. Answer it there."
+        }
+        resolvingRequestIDs.remove(requestID)
+    }
+
+    /// Runs an explicit provider setup action, such as installing or removing
+    /// AgentHub's Claude hooks.
+    func configure(provider: Provider, action: ProviderConfigurationAction) async {
+        do {
+            let reply = try await client.send(.configureProvider(provider, action))
+            guard case .components(let components) = reply else {
+                message = reply.failureMessage
+                    ?? "Unable to update \(provider.displayName) setup"
+                return
+            }
+            message = nil
+            // Refresh first: it replaces `state` wholesale, and the reported
+            // component status is newer than the snapshot's.
+            try await refresh()
+            for component in components {
+                state.components[component.id] = component
+            }
+        } catch {
+            message = "Unable to update \(provider.displayName) setup"
         }
     }
 

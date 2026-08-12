@@ -7,6 +7,92 @@ import AgentHubSecurity
 
 @MainActor
 final class DashboardViewModelTests: XCTestCase {
+    func testClaudeNativeResolutionExecutesPlanThenMarksItStarted() async {
+        let fixture = DashboardFixture()
+        let plan = nativePlan(requestID: fixture.request.id)
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            resolveReply: .nativeInteraction(plan)
+        )
+        let executor = RecordingNativeExecutor()
+        let model = DashboardViewModel(client: client, nativeExecutor: executor)
+        await model.connect()
+
+        await model.resolve(fixture.request.id, decision: .accept)
+
+        let executed = await executor.plans()
+        XCTAssertEqual(executed, [plan])
+        let commands = await client.recordedCommands
+        XCTAssertTrue(commands.contains {
+            if case .nativeInteractionStarted(let requestID, let planID) = $0 {
+                return requestID == fixture.request.id && planID == plan.id
+            }
+            return false
+        })
+    }
+
+    func testFailedNativeInteractionNeverReportsItStarted() async {
+        let fixture = DashboardFixture()
+        let plan = nativePlan(requestID: fixture.request.id)
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            resolveReply: .nativeInteraction(plan)
+        )
+        let executor = RecordingNativeExecutor(error: .accessibilityUnavailable)
+        let model = DashboardViewModel(client: client, nativeExecutor: executor)
+        await model.connect()
+
+        await model.resolve(fixture.request.id, decision: .accept)
+
+        let commands = await client.recordedCommands
+        XCTAssertFalse(commands.contains {
+            if case .nativeInteractionStarted = $0 { return true }
+            return false
+        })
+        XCTAssertNotNil(model.message)
+    }
+
+    func testConfigureClaudeSendsExplicitSetupActionAndStoresComponents() async {
+        let fixture = DashboardFixture()
+        let component = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: true,
+            version: "2.1.228",
+            path: "/tmp/agenthub-claude-hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            configureReply: .components([component])
+        )
+        let model = DashboardViewModel(client: client)
+        await model.connect()
+
+        await model.configure(provider: .claude, action: .installHooks)
+
+        let commands = await client.recordedCommands
+        XCTAssertTrue(commands.contains {
+            if case .configureProvider(.claude, .installHooks) = $0 { return true }
+            return false
+        })
+        XCTAssertEqual(model.state.components["claude:hooks"], component)
+    }
+
+    private func nativePlan(requestID: UUID) -> NativeInteractionPlan {
+        NativeInteractionPlan(
+            id: UUID(),
+            provider: .claude,
+            requestID: requestID,
+            bundleID: "com.anthropic.claudefordesktop",
+            windowHint: nil,
+            sessionNativeID: "abc123",
+            promptFingerprint: "fingerprint",
+            operation: .choose(label: "Yes")
+        )
+    }
+
     func testLaunchOpenCodeSendsGenericProviderCommand() async {
         let fixture = DashboardFixture()
         let client = FakeDaemonClient(snapshot: fixture.state)
@@ -239,6 +325,8 @@ private actor FakeDaemonClient: DaemonClientProtocol {
     private let attachReply: DaemonReply
     private let authenticateReply: DaemonReply
     private let detachReply: DaemonReply
+    private let resolveReply: DaemonReply?
+    private let configureReply: DaemonReply
     private let operationLog: RecordingOperationLog?
 
     init(
@@ -248,6 +336,8 @@ private actor FakeDaemonClient: DaemonClientProtocol {
         attachReply: DaemonReply = .failure("unsupported fixture command"),
         authenticateReply: DaemonReply = .failure("unsupported fixture command"),
         detachReply: DaemonReply = .failure("unsupported fixture command"),
+        resolveReply: DaemonReply? = nil,
+        configureReply: DaemonReply = .failure("unsupported fixture command"),
         operationLog: RecordingOperationLog? = nil
     ) {
         self.snapshot = snapshot
@@ -256,6 +346,8 @@ private actor FakeDaemonClient: DaemonClientProtocol {
         self.attachReply = attachReply
         self.authenticateReply = authenticateReply
         self.detachReply = detachReply
+        self.resolveReply = resolveReply
+        self.configureReply = configureReply
         self.operationLog = operationLog
     }
 
@@ -275,7 +367,11 @@ private actor FakeDaemonClient: DaemonClientProtocol {
         case .jumpTarget:
             return .jump(jump)
         case .resolveRequest(let id, _):
-            return .accepted(id)
+            return resolveReply ?? .accepted(id)
+        case .configureProvider:
+            return configureReply
+        case .nativeInteractionStarted:
+            return .completed
         case .launch:
             return .accepted(snapshot.sessions.keys.first ?? UUID())
         case .attachEndpoint:
@@ -388,5 +484,21 @@ private final class RecordingCredentialStore: CredentialStoring, @unchecked Send
     func delete(reference: String) throws {
         lock.withLock { deletedStorage.append(reference) }
         operationLog?.record("credentials.delete")
+    }
+}
+
+private actor RecordingNativeExecutor: NativeInteractionExecuting {
+    private var executed: [NativeInteractionPlan] = []
+    private let error: NativeInteractionError?
+
+    init(error: NativeInteractionError? = nil) {
+        self.error = error
+    }
+
+    func plans() -> [NativeInteractionPlan] { executed }
+
+    func execute(_ plan: NativeInteractionPlan) async throws {
+        if let error { throw error }
+        executed.append(plan)
     }
 }

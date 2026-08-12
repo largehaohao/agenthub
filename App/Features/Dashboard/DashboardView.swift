@@ -5,6 +5,7 @@ struct DashboardView: View {
     @StateObject private var model: DashboardViewModel
     @State private var showingLaunch = false
     @State private var showingOpenCodeSettings = false
+    @State private var showingClaudeSettings = false
 
     init(client: any DaemonClientProtocol) {
         _model = StateObject(wrappedValue: DashboardViewModel(client: client))
@@ -80,6 +81,11 @@ struct DashboardView: View {
                 } label: {
                     Label("OpenCode Settings", systemImage: "network")
                 }
+                Button {
+                    showingClaudeSettings = true
+                } label: {
+                    Label("Claude Settings", systemImage: "sparkles")
+                }
             }
         }
         .sheet(isPresented: $showingLaunch) {
@@ -101,6 +107,16 @@ struct DashboardView: View {
                 },
                 onDetach: { endpoint in
                     await model.detachOpenCode(endpoint: endpoint)
+                }
+            )
+        }
+        .sheet(isPresented: $showingClaudeSettings) {
+            ClaudeSettingsView(
+                components: model.state.components.values
+                    .filter { $0.provider == .claude }
+                    .sorted { $0.component < $1.component },
+                onConfigure: { action in
+                    await model.configure(provider: .claude, action: action)
                 }
             )
         }
@@ -148,6 +164,7 @@ private struct LaunchTaskSheet: View {
             Text("New Task").font(.title2.bold())
             Picker("Provider", selection: $provider) {
                 Text("Codex").tag(Provider.codex)
+                Text("Claude").tag(Provider.claude)
                 Text("OpenCode").tag(Provider.openCode)
             }
             .pickerStyle(.segmented)
