@@ -22,6 +22,9 @@ public actor RequestService {
     private let adapters: [Provider: any AgentAdapter]
     /// Native plans awaiting confirmation that the app acted on the real UI.
     private var pendingNativePlans: [UUID: NativeInteractionPlan] = [:]
+    /// Hook permission waiters poll this map; resolve writes results here.
+    /// Using a result map + sleep avoids deadlocking an actor continuation.
+    private var hookPermissionResults: [UUID: HookPermissionDecision] = [:]
 
     public init(
         store: AgentHubStore,
@@ -68,6 +71,10 @@ public actor RequestService {
         } catch AdapterOperationError.requestAlreadyResolved {
             // The provider is authoritative; converge local state below.
         }
+        // Publish the hook decision before marking resolved so waiters that
+        // observe `.resolved` can still read the map without racing to `.ask`.
+        let hookDecision = mapHookDecision(decision)
+        hookPermissionResults[id] = hookDecision
         try await store.apply(.requestResolved(id: id, outcome: String(describing: decision)))
         try await store.appendAudit(AuditEvent(
             action: "request.resolved",
@@ -94,14 +101,48 @@ public actor RequestService {
 
     /// Waits for a pending request to be resolved from AgentHub, or returns
     /// `.ask` when the timeout elapses / the request is missing. Never returns
-    /// `.allow` by default. Task 4 replaces this stub with a continuation map.
+    /// `.allow` by default.
     public func awaitHookPermission(
         requestID: UUID,
         timeoutMilliseconds: Int
     ) async -> HookPermissionDecision {
-        _ = requestID
-        let nanoseconds = UInt64(max(0, timeoutMilliseconds)) * 1_000_000
-        try? await Task.sleep(nanoseconds: min(nanoseconds, 50_000_000))
+        let budget = max(0, timeoutMilliseconds)
+        let deadline = Date().addingTimeInterval(Double(budget) / 1_000)
+
+        while Date() < deadline {
+            if let decision = hookPermissionResults.removeValue(forKey: requestID) {
+                return decision
+            }
+
+            let snapshot = (try? await store.snapshot()) ?? .empty
+            if let request = snapshot.requests[requestID] {
+                switch request.state {
+                case .pending, .resolving:
+                    break
+                case .resolved:
+                    if let decision = hookPermissionResults.removeValue(forKey: requestID) {
+                        return decision
+                    }
+                    return .ask
+                case .expired:
+                    return .ask
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+
         return .ask
+    }
+
+    private func mapHookDecision(_ decision: RequestDecision) -> HookPermissionDecision {
+        switch decision {
+        case .accept, .acceptForSession:
+            return .allow
+        case .decline, .cancel:
+            return .deny
+        case .text, .choices, .answers:
+            return .ask
+        }
     }
 }
