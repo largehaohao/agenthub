@@ -31,7 +31,7 @@ targets:
       - package: AgentHubPackage
         product: AgentHubSecurity
     postBuildScripts:
-      - name: Embed agenthubd
+      - name: Embed helpers
         script: |
           set -euo pipefail
           if [[ "$CONFIGURATION" == "Release" ]]; then
@@ -39,15 +39,22 @@ targets:
           else
             SWIFT_CONFIGURATION="debug"
           fi
-          xcrun swift build \
-            --package-path "$SRCROOT" \
-            --product agenthubd \
-            --configuration "$SWIFT_CONFIGURATION"
+          for PRODUCT in agenthubd agenthub-claude-hook; do
+            xcrun swift build \
+              --package-path "$SRCROOT" \
+              --product "$PRODUCT" \
+              --configuration "$SWIFT_CONFIGURATION"
+          done
           HELPER_DIR="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers"
           mkdir -p "$HELPER_DIR"
-          install -m 700 "$SRCROOT/.build/$SWIFT_CONFIGURATION/agenthubd" "$HELPER_DIR/agenthubd"
+          for PRODUCT in agenthubd agenthub-claude-hook; do
+            install -m 700 \
+              "$SRCROOT/.build/$SWIFT_CONFIGURATION/$PRODUCT" \
+              "$HELPER_DIR/$PRODUCT"
+          done
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthubd
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-claude-hook
         basedOnDependencyAnalysis: false
   AgentHubAppTests:
     type: bundle.unit-test

@@ -4,6 +4,9 @@ import Foundation
 struct DaemonInstallationPaths: Equatable {
     let supportDirectory: URL
     let executable: URL
+    /// Claude invokes this helper directly by absolute path, so it is installed
+    /// beside the daemon and never referenced from the LaunchAgent plist.
+    let claudeHookExecutable: URL
     let plist: URL
     let standardOutput: URL
     let standardError: URL
@@ -29,6 +32,7 @@ enum DaemonInstallation {
         return DaemonInstallationPaths(
             supportDirectory: support,
             executable: support.appendingPathComponent("bin/agenthubd"),
+            claudeHookExecutable: support.appendingPathComponent("bin/agenthub-claude-hook"),
             plist: home.appendingPathComponent("Library/LaunchAgents/\(label).plist"),
             standardOutput: logs.appendingPathComponent("agenthubd.log"),
             standardError: logs.appendingPathComponent("agenthubd.error.log")
@@ -71,19 +75,21 @@ enum DaemonInstallation {
 
     static func install(
         helper: URL,
+        claudeHook: URL? = nil,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         pathEnvironment: String = ProcessInfo.processInfo.environment["PATH"]
             ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         fileManager: FileManager = .default
     ) throws {
-        guard fileManager.isExecutableFile(atPath: helper.path) else {
-            throw DaemonInstallationError.helperMissing
-        }
+        let hook = claudeHook
+            ?? helper.deletingLastPathComponent()
+                .appendingPathComponent("agenthub-claude-hook")
         let paths = paths(home: home)
-        try prepareDirectory(paths.supportDirectory, mode: 0o700, fileManager: fileManager)
-        try prepareDirectory(
-            paths.executable.deletingLastPathComponent(),
-            mode: 0o700,
+
+        try stageHelpers(
+            daemon: helper,
+            claudeHook: hook,
+            home: home,
             fileManager: fileManager
         )
         try prepareDirectory(
@@ -96,12 +102,6 @@ enum DaemonInstallation {
             withIntermediateDirectories: true
         )
 
-        try stageCopy(
-            from: helper,
-            to: paths.executable,
-            mode: 0o700,
-            fileManager: fileManager
-        )
         let plist = renderPlist(
             executable: paths.executable.path,
             pathEnvironment: pathEnvironment
@@ -122,6 +122,43 @@ enum DaemonInstallation {
         _ = try? runLaunchctl(["bootout", "\(domain)/\(label)"])
         try bootstrap(domain: domain, plist: paths.plist.path)
         try runLaunchctl(["kickstart", "-k", "\(domain)/\(label)"])
+    }
+
+    /// Stages both helpers together. Both are validated before either is
+    /// copied, so a missing hook bridge cannot leave a half-installed runtime
+    /// where the daemon runs but Claude sessions are never observed.
+    static func stageHelpers(
+        daemon: URL,
+        claudeHook: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        fileManager: FileManager = .default
+    ) throws {
+        for helper in [daemon, claudeHook] {
+            guard fileManager.isExecutableFile(atPath: helper.path) else {
+                throw DaemonInstallationError.helperMissing
+            }
+        }
+
+        let paths = paths(home: home)
+        try prepareDirectory(paths.supportDirectory, mode: 0o700, fileManager: fileManager)
+        try prepareDirectory(
+            paths.executable.deletingLastPathComponent(),
+            mode: 0o700,
+            fileManager: fileManager
+        )
+
+        try stageCopy(
+            from: daemon,
+            to: paths.executable,
+            mode: 0o700,
+            fileManager: fileManager
+        )
+        try stageCopy(
+            from: claudeHook,
+            to: paths.claudeHookExecutable,
+            mode: 0o700,
+            fileManager: fileManager
+        )
     }
 
     private static func prepareDirectory(

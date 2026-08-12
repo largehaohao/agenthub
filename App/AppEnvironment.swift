@@ -251,6 +251,10 @@ private actor FixtureDaemonClient: DaemonClientProtocol {
         case .detachEndpoint(_, let id):
             state.endpoints.removeValue(forKey: id)
             return .completed
+        case .ingestProviderHook, .nativeInteractionStarted:
+            return .completed
+        case .configureProvider:
+            return .components(Array(state.components.values))
         }
     }
 

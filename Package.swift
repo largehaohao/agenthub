@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "AgentHubDaemon", targets: ["AgentHubDaemon"]),
         .library(name: "AgentHubTestSupport", targets: ["AgentHubTestSupport"]),
         .executable(name: "agenthubd", targets: ["agenthubd"]),
+        .executable(name: "agenthub-claude-hook", targets: ["agenthub-claude-hook"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.10.0"),
@@ -100,6 +101,10 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
             ]
+        ),
+        .executableTarget(
+            name: "agenthub-claude-hook",
+            dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubIPC"]
         ),
         .testTarget(
             name: "AgentHubClaudeTests",
