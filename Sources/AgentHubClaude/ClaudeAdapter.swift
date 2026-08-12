@@ -46,12 +46,19 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         var detail: String
         var allowedActions: [String]
         var createdAt: Date
+        /// The managed pane's visible-prompt hash when this request appeared.
+        /// Nil for surfaces AgentHub cannot capture.
+        var screenFingerprint: String?
     }
 
     private let accountID: String
     private let classifier: ClaudeProcessClassifier
     private let decoder = ClaudeHookDecoder()
     private let transcripts: (any ClaudeTranscriptReading)?
+    private let terminal: (any ClaudeTerminalControlling)?
+    private let executor = ClaudeManagedRequestExecutor()
+    private let makeSessionID: @Sendable () -> UUID
+    private let launchTimeout: Duration
     private let now: @Sendable () -> Date
 
     private var sessions: [SessionKey: ObservedSession] = [:]
@@ -60,16 +67,24 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     private var managedSessionIDs: Set<UUID> = []
     private var managedRuntimes: [SessionKey: ClaudeManagedRuntime] = [:]
     private var continuations: [UUID: AsyncStream<AgentEvent>.Continuation] = [:]
+    /// Claude UUIDs whose matching `SessionStart` hook has arrived.
+    private var launchAcknowledged: Set<UUID> = []
 
     public init(
         accountID: String,
         classifier: ClaudeProcessClassifier = ClaudeProcessClassifier(),
         transcripts: (any ClaudeTranscriptReading)? = nil,
+        terminal: (any ClaudeTerminalControlling)? = nil,
+        makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
+        launchTimeout: Duration = .seconds(30),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.accountID = accountID
         self.classifier = classifier
         self.transcripts = transcripts
+        self.terminal = terminal
+        self.makeSessionID = makeSessionID
+        self.launchTimeout = launchTimeout
         self.now = now
     }
 
@@ -95,6 +110,10 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         switch event {
         case .sessionStart:
             setStatus(.idle, for: key, at: envelope.observedAt)
+            // Releases a launch waiting for this exact Claude UUID.
+            if let claudeSessionID, managedSessionIDs.contains(claudeSessionID) {
+                launchAcknowledged.insert(claudeSessionID)
+            }
 
         case .userPromptSubmit:
             setStatus(.working, for: key, at: envelope.observedAt)
@@ -109,7 +128,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             setStatus(.completed, for: key, at: envelope.observedAt)
 
         case .permissionRequest(let value):
-            record(
+            await record(
                 request: value.toolName,
                 kind: .permission,
                 title: "Permission requested",
@@ -122,7 +141,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
 
         case .preToolUse(let value) where value.toolName == "AskUserQuestion":
             guard let question = value.questions.first else { break }
-            record(
+            await record(
                 request: value.toolName,
                 kind: .choice,
                 title: question.prompt,
@@ -199,8 +218,90 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     }
 
     public func launch(_ request: LaunchRequest) async throws -> ProviderSessionRef {
-        // Managed launch arrives with Task 10's runtime wiring.
-        throw ClaudeAdapterError.unsupportedCapability
+        guard let terminal else { throw ClaudeAdapterError.unsupportedCapability }
+
+        let claudeSessionID = makeSessionID()
+        let sessionName = "agenthub-\(claudeSessionID.uuidString.prefix(8).lowercased())"
+        let title = URL(fileURLWithPath: request.cwd).lastPathComponent
+        let key = SessionKey(nativeID: claudeSessionID.uuidString, surface: .managedCLI)
+
+        // Register before starting tmux so the arriving SessionStart hook is
+        // classified as managed rather than as a discovered external CLI.
+        managedSessionIDs.insert(claudeSessionID)
+
+        let runtime = try await terminal.launch(
+            name: sessionName,
+            claudeSessionID: claudeSessionID,
+            title: title,
+            cwd: request.cwd,
+            model: request.model?.modelID
+        )
+        managedRuntimes[key] = runtime
+
+        // Make the session visible immediately so a failed launch stays on the
+        // same row rather than disappearing.
+        sessions[key] = ObservedSession(
+            id: deterministicID("session", key.nativeID, key.surface.rawValue),
+            key: key,
+            title: title,
+            cwd: request.cwd,
+            transcriptPath: "",
+            status: .starting,
+            lastActivityAt: now(),
+            claudeSessionID: claudeSessionID
+        )
+
+        try await awaitSessionStart(for: claudeSessionID, key: key)
+        try await deliverInitialPrompt(request.prompt, runtime: runtime, terminal: terminal, key: key)
+
+        return ProviderSessionRef(
+            provider: .claude,
+            accountID: accountID,
+            nativeID: claudeSessionID.uuidString
+        )
+    }
+
+    /// Waits for the hook that binds the requested UUID to a live Claude
+    /// process. A timeout marks the session recoverable instead of orphaning it.
+    ///
+    /// This polls rather than suspending on a continuation: awaiting inside the
+    /// actor would hold its isolation and prevent `ingest` from ever delivering
+    /// the very `SessionStart` being waited for.
+    private func awaitSessionStart(for claudeSessionID: UUID, key: SessionKey) async throws {
+        let deadline = ContinuousClock.now.advanced(by: launchTimeout)
+
+        while ContinuousClock.now < deadline {
+            if launchAcknowledged.contains(claudeSessionID) {
+                launchAcknowledged.remove(claudeSessionID)
+                return
+            }
+            // Yields actor isolation so queued hook ingestion can run.
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        setStatus(.error, for: key, at: now())
+        throw ClaudeAdapterError.launchTimedOut
+    }
+
+    /// Pastes the initial instruction exactly once, and only into a verified
+    /// empty composer, so a prompt is never injected mid-turn.
+    private func deliverInitialPrompt(
+        _ prompt: String,
+        runtime: ClaudeManagedRuntime,
+        terminal: any ClaudeTerminalControlling,
+        key: SessionKey
+    ) async throws {
+        guard !prompt.isEmpty else { return }
+
+        let screen = try ClaudeTerminalScreen.parse(
+            await terminal.capture(paneID: runtime.paneID)
+        )
+        guard screen.isIdleComposer else {
+            throw ClaudeTerminalError.stalePrompt
+        }
+
+        try await terminal.pasteLiteral(prompt, paneID: runtime.paneID)
+        try await terminal.submit(paneID: runtime.paneID)
     }
 
     public func reconcile() async throws -> AdapterSnapshot {
@@ -241,20 +342,54 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         }
         // Only a verified AgentHub-managed tmux runtime can receive direct
         // input; external CLI and Desktop remain clipboard-and-jump.
-        guard observed.key.surface == .managedCLI else {
+        guard observed.key.surface == .managedCLI,
+              let terminal,
+              let runtime = managedRuntimes[observed.key] else {
             throw ClaudeAdapterError.unsupportedCapability
         }
-        throw ClaudeAdapterError.unsupportedCapability
+
+        // Never interrupt a working turn or a prompt awaiting the user.
+        guard observed.status == .idle else { throw ClaudeAdapterError.sessionBusy }
+        guard !requests.values.contains(where: { $0.sessionKey == observed.key }) else {
+            throw ClaudeAdapterError.sessionBusy
+        }
+
+        let screen = try ClaudeTerminalScreen.parse(
+            await terminal.capture(paneID: runtime.paneID)
+        )
+        guard screen.isIdleComposer else { throw ClaudeTerminalError.stalePrompt }
+
+        try await terminal.pasteLiteral(input.text, paneID: runtime.paneID)
+        try await terminal.submit(paneID: runtime.paneID)
     }
 
     public func resolve(
         _ request: ProviderRequestRef,
         decision: RequestDecision
     ) async throws {
-        guard requests[request.requestID] != nil else {
+        guard let observed = requests[request.requestID] else {
             throw ClaudeAdapterError.sessionNotFound
         }
-        throw ClaudeAdapterError.unsupportedCapability
+        guard observed.sessionKey.surface == .managedCLI,
+              let terminal,
+              let runtime = managedRuntimes[observed.sessionKey] else {
+            throw ClaudeAdapterError.unsupportedCapability
+        }
+
+        // The screen fingerprint recorded when this request was raised. The
+        // executor re-captures the pane and refuses to send anything if the
+        // visible prompt has changed since then.
+        guard let expected = observed.screenFingerprint else {
+            throw ClaudeTerminalError.stalePrompt
+        }
+        try await executor.resolve(
+            decision: decision,
+            expectedFingerprint: expected,
+            runtime: runtime,
+            terminal: terminal
+        )
+        requests.removeValue(forKey: request.requestID)
+        emit(.requestResolved(id: observed.id, outcome: "resolved by AgentHub"))
     }
 
     public func resolutionRoute(
@@ -295,8 +430,19 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
 
         switch observed.key.surface {
         case .managedCLI:
-            guard let runtime = managedRuntimes[observed.key] else {
+            guard let runtime = managedRuntimes[observed.key], let terminal else {
                 return .unavailable("The managed terminal for this session is unavailable.")
+            }
+            // Select the existing tmux session, reattaching it to iTerm if the
+            // window was closed, before asking the app to activate iTerm.
+            do {
+                if try await terminal.isAlive(sessionName: runtime.sessionName) {
+                    try await terminal.select(sessionName: runtime.sessionName)
+                } else {
+                    try await terminal.attach(sessionName: runtime.sessionName)
+                }
+            } catch {
+                return .unavailable("AgentHub could not reopen this Claude terminal.")
             }
             return .application(
                 bundleID: "com.googlecode.iterm2",
@@ -385,9 +531,19 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         actions: [String],
         key: SessionKey,
         at date: Date
-    ) {
+    ) async {
         let fingerprint = self.fingerprint(key: key, toolName: toolName, actions: actions)
         guard requests[fingerprint] == nil else { return }
+
+        // Capture the prompt as displayed now, so a later resolve can prove the
+        // screen has not moved on.
+        var screenFingerprint: String?
+        if key.surface == .managedCLI,
+           let terminal,
+           let runtime = managedRuntimes[key],
+           let captured = try? await terminal.capture(paneID: runtime.paneID) {
+            screenFingerprint = try? ClaudeTerminalScreen.parse(captured).fingerprint
+        }
 
         let observed = ObservedRequest(
             id: deterministicID("request", key.nativeID, fingerprint),
@@ -398,7 +554,8 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             title: title,
             detail: detail,
             allowedActions: actions,
-            createdAt: date
+            createdAt: date,
+            screenFingerprint: screenFingerprint
         )
         requests[fingerprint] = observed
         emit(.requestUpserted(pendingRequest(from: observed)))
