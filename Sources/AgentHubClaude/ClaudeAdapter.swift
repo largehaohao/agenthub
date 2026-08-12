@@ -56,6 +56,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     private let decoder = ClaudeHookDecoder()
     private let transcripts: (any ClaudeTranscriptReading)?
     private let terminal: (any ClaudeTerminalControlling)?
+    private let hookInstaller: ClaudeHookInstaller?
     private let executor = ClaudeManagedRequestExecutor()
     private let makeSessionID: @Sendable () -> UUID
     private let launchTimeout: Duration
@@ -75,6 +76,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         classifier: ClaudeProcessClassifier = ClaudeProcessClassifier(),
         transcripts: (any ClaudeTranscriptReading)? = nil,
         terminal: (any ClaudeTerminalControlling)? = nil,
+        hookInstaller: ClaudeHookInstaller? = nil,
         makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
         launchTimeout: Duration = .seconds(30),
         now: @escaping @Sendable () -> Date = { Date() }
@@ -83,6 +85,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         self.classifier = classifier
         self.transcripts = transcripts
         self.terminal = terminal
+        self.hookInstaller = hookInstaller
         self.makeSessionID = makeSessionID
         self.launchTimeout = launchTimeout
         self.now = now
@@ -199,9 +202,41 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         }
     }
 
-    public func configure(_ action: ProviderConfigurationAction) async throws {
-        // Hook installation is owned by ClaudeHookInstaller and driven by the
-        // daemon; the adapter exposes the action without side effects here.
+    /// Performs an explicit setup action and reports resulting component
+    /// health. Hook installation only ever happens through this path, never as
+    /// a side effect of observing sessions.
+    @discardableResult
+    public func configure(
+        _ action: ProviderConfigurationAction
+    ) async throws -> [ProviderComponentStatus] {
+        guard let hookInstaller else {
+            // Without a packaged hook helper the component is simply reported
+            // unavailable; setup is never silently skipped and called a success.
+            return [
+                ProviderComponentStatus(
+                    provider: .claude,
+                    component: "hooks",
+                    available: false,
+                    version: nil,
+                    path: nil,
+                    message: "The AgentHub Claude hook helper is not installed yet.",
+                    changedAt: now()
+                ),
+            ]
+        }
+
+        switch action {
+        case .installHooks:
+            try hookInstaller.install()
+        case .uninstallHooks:
+            try hookInstaller.uninstall()
+        case .refreshComponents:
+            break
+        }
+
+        let status = try hookInstaller.status()
+        emit(.componentUpserted(status))
+        return [status]
     }
 
     // MARK: - AgentAdapter

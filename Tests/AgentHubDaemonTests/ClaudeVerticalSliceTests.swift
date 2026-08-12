@@ -39,27 +39,29 @@ final class ClaudeVerticalSliceTests: XCTestCase {
 
     func testConfigureProviderReportsComponentStatusFromTheAdapter() async throws {
         let context = try await makeContext(start: true)
-        try await context.store.apply(.componentUpserted(
-            ProviderComponentStatus(
-                provider: .claude,
-                component: "hooks",
-                available: true,
-                version: "2.1.228",
-                path: "/tmp/agenthub-claude-hook",
-                message: nil,
-                changedAt: Date(timeIntervalSince1970: 1)
-            )
-        ))
-        try await context.coordinator.refreshFromStore()
+        let status = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: true,
+            version: "2.1.228",
+            path: "/tmp/agenthub-claude-hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        await context.adapter.setComponents([status])
 
         let reply = await context.api.handle(.configureProvider(.claude, .installHooks))
 
         guard case .components(let components) = reply else {
             return XCTFail("expected component status")
         }
-        XCTAssertEqual(components.first?.component, "hooks")
+        XCTAssertEqual(components, [status])
         let actions = await context.adapter.configureActions()
         XCTAssertEqual(actions, [.installHooks])
+
+        // The reported status is persisted, so a later snapshot agrees with it.
+        let snapshot = try await context.store.snapshot()
+        XCTAssertEqual(snapshot.components[status.id], status)
     }
 
     func testNativeRequestRemainsPendingUntilAppStartsMatchingPlan() async throws {

@@ -22,8 +22,15 @@ actor HookTestAdapter: HookEventIngestingAdapter, ProviderConfigurableAdapter {
         hooks.append(envelope)
     }
 
-    func configure(_ action: ProviderConfigurationAction) async throws {
+    var componentsToReturn: [ProviderComponentStatus] = []
+
+    func setComponents(_ value: [ProviderComponentStatus]) { componentsToReturn = value }
+
+    func configure(
+        _ action: ProviderConfigurationAction
+    ) async throws -> [ProviderComponentStatus] {
         actions.append(action)
+        return componentsToReturn
     }
 
     func capabilities() async -> [Capability: ReliabilityLevel] { [:] }

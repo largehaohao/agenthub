@@ -60,6 +60,22 @@ private func resolvedClaudeTerminal() -> TmuxClaudeTerminalRuntime? {
     )
 }
 
+/// Points the installer at the user's Claude settings and the packaged hook
+/// helper. Returns nil when the helper is absent so setup reports honestly
+/// rather than writing a hook command that cannot run.
+private func resolvedClaudeHookInstaller() -> ClaudeHookInstaller? {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let helper = home.appendingPathComponent(
+        "Library/Application Support/AgentHub/bin/agenthub-claude-hook"
+    )
+    guard FileManager.default.isExecutableFile(atPath: helper.path) else { return nil }
+
+    return ClaudeHookInstaller(
+        settingsURL: home.appendingPathComponent(".claude/settings.json"),
+        executableURL: helper
+    )
+}
+
 /// Executes a command directly with an argument array; no shell is involved.
 @Sendable
 private func runClaudeCommand(_ command: ClaudeCommand) async throws -> ClaudeCommandResult {
@@ -145,7 +161,8 @@ private func runDaemon(paths: DaemonPaths) async throws {
             claudeRoot: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude", isDirectory: true)
         ),
-        terminal: resolvedClaudeTerminal()
+        terminal: resolvedClaudeTerminal(),
+        hookInstaller: resolvedClaudeHookInstaller()
     )
     let adapters: [Provider: any AgentAdapter] = [
         .codex: codexAdapter,

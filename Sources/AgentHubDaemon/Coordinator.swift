@@ -198,8 +198,13 @@ public actor Coordinator {
               let configurable = adapter as? any ProviderConfigurableAdapter else {
             throw CoordinatorError.unsupportedProvider
         }
-        try await configurable.configure(action)
-        return Array(state.components.values)
+        let components = try await configurable.configure(action)
+        // Persist what the adapter actually observed, so the reported status
+        // reflects the real setup rather than a stale snapshot.
+        for component in components {
+            try await persistAndReduce(.componentUpserted(component), publish: true)
+        }
+        return components
     }
 
     public func send(_ input: AgentInput, to sessionID: UUID) async throws {

@@ -37,7 +37,12 @@ public protocol HookEventIngestingAdapter: AgentAdapter {
 }
 
 public protocol ProviderConfigurableAdapter: AgentAdapter {
-    func configure(_ action: ProviderConfigurationAction) async throws
+    /// Performs an explicit setup action and returns the resulting component
+    /// health, so a caller never has to assume the action took effect.
+    @discardableResult
+    func configure(
+        _ action: ProviderConfigurationAction
+    ) async throws -> [ProviderComponentStatus]
 }
 
 public protocol EndpointConfigurableAdapter: AgentAdapter {
