@@ -32,6 +32,13 @@ public actor AgentHubStore {
             try upsert(table: "message_envelopes", id: envelope.id.uuidString, body: envelope)
         case .quotaUpserted(let quota):
             try upsert(table: "quota_windows", id: quota.id, body: quota)
+        case .quotaRemoved(let id):
+            try database.write { database in
+                try database.execute(
+                    sql: "DELETE FROM quota_windows WHERE id = ?",
+                    arguments: [id]
+                )
+            }
         case .adapterHealth(let provider, let health):
             let body = try JSONEncoder.agentHub.encode(health)
             try database.write { database in

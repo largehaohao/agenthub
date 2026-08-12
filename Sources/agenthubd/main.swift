@@ -195,9 +195,16 @@ private func runDaemon(paths: DaemonPaths) async throws {
         hookInstaller: resolvedClaudeHookInstaller(),
         statusLineInstaller: resolvedClaudeStatusLineInstaller()
     )
+    let cursorQuotaAuth = CursorQuotaAuthStore()
+    let cursorQuotaCollector = CursorQuotaCollector(
+        auth: cursorQuotaAuth,
+        reader: CursorLoginSessionReader(),
+        client: CursorQuotaClient(accountID: "default")
+    )
     let cursorAdapter = CursorAdapter(
         accountID: "default",
-        hookInstaller: resolvedCursorHookInstaller()
+        hookInstaller: resolvedCursorHookInstaller(),
+        quotaCollector: cursorQuotaCollector
     )
     let adapters: [Provider: any AgentAdapter] = [
         .codex: codexAdapter,

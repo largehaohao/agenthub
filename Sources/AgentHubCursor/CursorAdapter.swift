@@ -39,6 +39,7 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
     private let accountID: String
     private let decoder = CursorHookDecoder()
     private let hookInstaller: CursorHookInstaller?
+    private let quotaCollector: CursorQuotaCollector?
     private let makeSessionID: @Sendable () -> UUID
     private let now: @Sendable () -> Date
 
@@ -46,6 +47,7 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
     private var nodes: [String: AgentNode] = [:]
     private var requests: [String: ObservedRequest] = [:]
     private var components: [String: ProviderComponentStatus] = [:]
+    private var publishedQuotaIDs: Set<String> = []
     private var continuations: [UUID: AsyncStream<AgentEvent>.Continuation] = [:]
     /// Last decision ingest's AgentHub request id, for the sync hook bridge.
     private(set) var lastPermissionRequestID: UUID?
@@ -53,11 +55,13 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
     public init(
         accountID: String,
         hookInstaller: CursorHookInstaller? = nil,
+        quotaCollector: CursorQuotaCollector? = nil,
         makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.accountID = accountID
         self.hookInstaller = hookInstaller
+        self.quotaCollector = quotaCollector
         self.makeSessionID = makeSessionID
         self.now = now
     }
@@ -86,11 +90,17 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
     }
 
     public func reconcile() async throws -> AdapterSnapshot {
-        AdapterSnapshot(
+        let quotas: [QuotaWindow]
+        if let quotaCollector {
+            quotas = await quotaCollector.currentWindows()
+        } else {
+            quotas = []
+        }
+        return AdapterSnapshot(
             sessions: sessions.values.map(session(from:)).sorted { $0.id.uuidString < $1.id.uuidString },
             nodes: Array(nodes.values),
             requests: requests.values.map(pendingRequest(from:)),
-            quotas: [],
+            quotas: quotas,
             endpoints: [],
             requestsAreAuthoritative: true
         )
@@ -221,15 +231,36 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
         switch action {
         case .installQuotaReporter, .uninstallQuotaReporter:
             throw CursorAdapterError.unsupportedCapability
-        case .authorizeQuotaAccess, .revokeQuotaAccess:
-            // Wired in Task 9.
-            throw CursorAdapterError.unsupportedCapability
+        case .authorizeQuotaAccess:
+            return try await authorizeQuota()
+        case .revokeQuotaAccess:
+            return try await revokeQuota()
         case .installHooks, .uninstallHooks, .refreshComponents:
             break
         }
 
-        guard let hookInstaller else {
-            return [
+        if action == .refreshComponents, let quotaCollector {
+            _ = try? await quotaCollector.refresh()
+            await syncQuotaWindows(from: quotaCollector)
+        }
+
+        var results: [ProviderComponentStatus] = []
+        if let hookInstaller {
+            switch action {
+            case .installHooks:
+                try hookInstaller.install()
+            case .uninstallHooks:
+                try hookInstaller.uninstall()
+            case .refreshComponents, .installQuotaReporter, .uninstallQuotaReporter,
+                 .authorizeQuotaAccess, .revokeQuotaAccess:
+                break
+            }
+            let status = try hookInstaller.status()
+            components[status.component] = status
+            emit(.componentUpserted(status))
+            results.append(status)
+        } else {
+            results.append(
                 ProviderComponentStatus(
                     provider: .cursor,
                     component: "hooks",
@@ -238,21 +269,43 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
                     path: nil,
                     message: "The AgentHub Cursor hook helper is not installed yet.",
                     changedAt: now()
-                ),
-            ]
+                )
+            )
         }
 
-        switch action {
-        case .installHooks:
-            try hookInstaller.install()
-        case .uninstallHooks:
-            try hookInstaller.uninstall()
-        case .refreshComponents, .installQuotaReporter, .uninstallQuotaReporter,
-             .authorizeQuotaAccess, .revokeQuotaAccess:
-            break
+        if let quotaCollector {
+            let status = await quotaCollector.quotaComponentStatus()
+            components[status.component] = status
+            emit(.componentUpserted(status))
+            results.append(status)
         }
+        return results
+    }
 
-        let status = try hookInstaller.status()
+    private func authorizeQuota() async throws -> [ProviderComponentStatus] {
+        guard let quotaCollector else {
+            throw CursorAdapterError.unsupportedCapability
+        }
+        await quotaCollector.authorize()
+        _ = try? await quotaCollector.refresh()
+        await syncQuotaWindows(from: quotaCollector)
+        let status = await quotaCollector.quotaComponentStatus()
+        components[status.component] = status
+        emit(.componentUpserted(status))
+        return [status]
+    }
+
+    private func revokeQuota() async throws -> [ProviderComponentStatus] {
+        guard let quotaCollector else {
+            throw CursorAdapterError.unsupportedCapability
+        }
+        let removedIDs = publishedQuotaIDs
+        await quotaCollector.revoke()
+        for id in removedIDs {
+            emit(.quotaRemoved(id: id))
+        }
+        publishedQuotaIDs.removeAll()
+        let status = await quotaCollector.quotaComponentStatus()
         components[status.component] = status
         emit(.componentUpserted(status))
         return [status]
@@ -411,6 +464,18 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
         for continuation in continuations.values {
             continuation.yield(event)
         }
+    }
+
+    private func syncQuotaWindows(from collector: CursorQuotaCollector) async {
+        let windows = await collector.currentWindows()
+        let nextIDs = Set(windows.map(\.id))
+        for removed in publishedQuotaIDs.subtracting(nextIDs) {
+            emit(.quotaRemoved(id: removed))
+        }
+        for window in windows {
+            emit(.quotaUpserted(window))
+        }
+        publishedQuotaIDs = nextIDs
     }
 
     private func removeContinuation(_ id: UUID) {

@@ -30,7 +30,25 @@ final class CursorAdapterConfigurationTests: XCTestCase {
         XCTAssertNotNil(hooks["sessionStart"])
     }
 
-    func testAuthorizeQuotaAccessIsUnsupportedUntilTask9() async {
+    func testAuthorizeQuotaAccessUpdatesQuotaComponent() async throws {
+        let defaults = UserDefaults(suiteName: "AgentHubCursorConfig.\(UUID().uuidString)")!
+        let auth = CursorQuotaAuthStore(defaults: defaults)
+        let reader = CursorLoginSessionReader(databaseURL: URL(fileURLWithPath: "/dev/null"))
+        let collector = CursorQuotaCollector(
+            auth: auth,
+            reader: reader,
+            client: CursorQuotaClient(accountID: "default")
+        )
+        let adapter = CursorAdapter(accountID: "default", quotaCollector: collector)
+
+        let components = try await adapter.configure(.authorizeQuotaAccess)
+        XCTAssertEqual(components.count, 1)
+        XCTAssertEqual(components.first?.component, "quota")
+        XCTAssertEqual(components.first?.available, true)
+        XCTAssertTrue(auth.isAuthorized)
+    }
+
+    func testAuthorizeQuotaAccessWithoutCollectorIsUnsupported() async {
         let adapter = CursorAdapter(accountID: "default")
         do {
             _ = try await adapter.configure(.authorizeQuotaAccess)

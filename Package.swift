@@ -55,7 +55,11 @@ let package = Package(
             linkerSettings: [.linkedFramework("Security")]
         ),
         .target(name: "AgentHubClaude", dependencies: ["AgentHubCore", "AgentHubIPC"]),
-        .target(name: "AgentHubCursor", dependencies: ["AgentHubCore"]),
+        .target(
+            name: "AgentHubCursor",
+            dependencies: ["AgentHubCore"],
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
         .target(
             name: "AgentHubDaemon",
             dependencies: [
@@ -131,7 +135,12 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentHubCursorTests",
-            dependencies: ["AgentHubCursor", "AgentHubCore", "AgentHubTestSupport"]
+            dependencies: [
+                "AgentHubCursor",
+                "AgentHubCore",
+                "AgentHubTestSupport",
+            ],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
             name: "AgentHubPersistenceTests",

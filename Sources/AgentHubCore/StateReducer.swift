@@ -87,6 +87,9 @@ public enum StateReducer {
         case .quotaUpserted(let quota):
             state.quotas[quota.id] = quota
 
+        case .quotaRemoved(let id):
+            state.quotas.removeValue(forKey: id)
+
         case .adapterHealth(let provider, let health):
             state.adapterHealth[provider] = health
             guard !health.connected else { return }
