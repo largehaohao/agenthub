@@ -1,7 +1,7 @@
 import Foundation
 import AgentHubCore
 
-public let agentHubIPCProtocolVersion = 2
+public let agentHubIPCProtocolVersion = 3
 
 public struct IPCEnvelope<Body: Codable & Sendable>: Codable, Sendable {
     public let protocolVersion: Int
@@ -29,6 +29,9 @@ public enum DaemonCommand: Codable, Sendable {
     case sendInput(UUID, AgentInput)
     case createHandoff(source: UUID, target: UUID, turnLimit: Int, note: String?)
     case jumpTarget(UUID)
+    case ingestProviderHook(ProviderHookEnvelope)
+    case configureProvider(Provider, ProviderConfigurationAction)
+    case nativeInteractionStarted(requestID: UUID, planID: UUID)
 }
 
 public enum DaemonReply: Codable, Equatable, Sendable {
@@ -37,6 +40,8 @@ public enum DaemonReply: Codable, Equatable, Sendable {
     case endpoint(ProviderEndpoint)
     case completed
     case jump(JumpTarget)
+    case components([ProviderComponentStatus])
+    case nativeInteraction(NativeInteractionPlan)
     case failure(String)
 }
 

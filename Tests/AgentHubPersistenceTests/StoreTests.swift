@@ -17,6 +17,55 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(restored.envelopes.values.first?.state, .queued)
     }
 
+    func testProviderComponentSurvivesRestart() async throws {
+        let url = temporaryDatabaseURL()
+        let store = try AgentHubStore(databaseURL: url)
+        let component = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: true,
+            version: "2.1.228",
+            path: "/tmp/hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+
+        try await store.apply(.componentUpserted(component))
+
+        let restored = try await AgentHubStore(databaseURL: url).snapshot()
+        XCTAssertEqual(restored.components[component.id], component)
+    }
+
+    func testProviderComponentUpsertReplacesEarlierStatus() async throws {
+        let url = temporaryDatabaseURL()
+        let store = try AgentHubStore(databaseURL: url)
+        let unavailable = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: false,
+            version: nil,
+            path: nil,
+            message: "not installed",
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        let available = ProviderComponentStatus(
+            provider: .claude,
+            component: "hooks",
+            available: true,
+            version: "2.1.228",
+            path: "/tmp/hook",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 2)
+        )
+
+        try await store.apply(.componentUpserted(unavailable))
+        try await store.apply(.componentUpserted(available))
+
+        let restored = try await AgentHubStore(databaseURL: url).snapshot()
+        XCTAssertEqual(restored.components.count, 1)
+        XCTAssertEqual(restored.components[available.id], available)
+    }
+
     func testDuplicateProviderRequestCreatesOneRow() async throws {
         let store = try AgentHubStore(databaseURL: temporaryDatabaseURL())
         let first = PendingRequest.fixture(state: .pending)

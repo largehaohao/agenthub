@@ -61,8 +61,16 @@ public actor AgentHubStore {
                     arguments: [id]
                 )
             }
-        case .componentUpserted:
-            break
+        case .componentUpserted(let component):
+            try upsert(
+                table: "provider_components",
+                id: component.id,
+                body: component,
+                extraColumns: [
+                    "provider": component.provider.rawValue,
+                    "component": component.component,
+                ]
+            )
         }
     }
 
@@ -107,6 +115,10 @@ public actor AgentHubStore {
             for row in try Row.fetchAll(database, sql: "SELECT body FROM provider_endpoints") {
                 let value: ProviderEndpoint = try decode(row["body"])
                 state.endpoints[value.id] = value
+            }
+            for row in try Row.fetchAll(database, sql: "SELECT body FROM provider_components") {
+                let value: ProviderComponentStatus = try decode(row["body"])
+                state.components[value.id] = value
             }
             return state
         }

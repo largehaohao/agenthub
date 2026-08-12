@@ -78,6 +78,11 @@ public actor DaemonAPI {
 
             case .jumpTarget(let sessionID):
                 return .jump(try await coordinator.jumpTarget(for: sessionID))
+
+            // Transport exists ahead of provider routing; wired up with the
+            // Claude adapter.
+            case .ingestProviderHook, .configureProvider, .nativeInteractionStarted:
+                return .failure(publicFailure(for: command))
             }
         } catch {
             return .failure(publicFailure(for: command))
@@ -95,6 +100,9 @@ public actor DaemonAPI {
         case .sendInput: "Unable to send input"
         case .createHandoff: "Unable to create handoff"
         case .jumpTarget: "Unable to open session"
+        case .ingestProviderHook: "Unable to ingest provider hook"
+        case .configureProvider(let provider, _): "Unable to configure \(provider.rawValue)"
+        case .nativeInteractionStarted: "Unable to record native interaction"
         }
     }
 }

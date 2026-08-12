@@ -31,7 +31,7 @@ final class IPCTests: XCTestCase {
         let reply = try await client.send(.getSnapshot)
         XCTAssertEqual(reply, .snapshot(.empty))
         let version = await client.negotiatedProtocolVersion
-        XCTAssertEqual(version, 2)
+        XCTAssertEqual(version, 3)
 
         var iterator = client.events.makeAsyncIterator()
         await server.broadcast(.stateChanged(sequence: 2))
@@ -71,12 +71,110 @@ final class IPCTests: XCTestCase {
     }
 
     func testProtocolRejectsUnknownVersion() {
-        XCTAssertThrowsError(try JSONLineCodec.validate(protocolVersion: 3)) {
-            XCTAssertEqual($0 as? IPCError, .unsupportedProtocolVersion(3))
+        XCTAssertThrowsError(try JSONLineCodec.validate(protocolVersion: 4)) {
+            XCTAssertEqual($0 as? IPCError, .unsupportedProtocolVersion(4))
         }
     }
 
-    func testProtocolV2RoundTripsProviderAndEndpointCommands() throws {
+    func testProtocolV3RoundTripsBoundedClaudeHook() throws {
+        let hook = try ProviderHookEnvelope(
+            provider: .claude,
+            rawJSON: Data("{\"hook_event_name\":\"SessionStart\"}".utf8),
+            sourcePID: 42,
+            ancestors: [],
+            observedAt: Date(timeIntervalSince1970: 1)
+        )
+
+        let data = try JSONLineCodec.encode(
+            IPCEnvelope(body: DaemonCommand.ingestProviderHook(hook))
+        )
+        let decoded = try JSONDecoder.agentHub.decode(
+            IPCEnvelope<DaemonCommand>.self,
+            from: data
+        )
+
+        XCTAssertEqual(decoded.protocolVersion, 3)
+        guard case .ingestProviderHook(let restored) = decoded.body else {
+            return XCTFail("hook command did not round trip")
+        }
+        XCTAssertEqual(restored, hook)
+    }
+
+    func testDecodeRejectsOversizedHookPayloadBypassingInitializer() throws {
+        let oversized = Data(repeating: 0x41, count: ProviderHookEnvelope.maximumPayloadBytes + 1)
+        let crafted: [String: Any] = [
+            "protocolVersion": 3,
+            "requestID": UUID().uuidString,
+            "body": [
+                "ingestProviderHook": [
+                    "_0": [
+                        "provider": "claude",
+                        "rawJSON": oversized.base64EncodedString(),
+                        "sourcePID": 42,
+                        "ancestors": [],
+                        "observedAt": 1,
+                    ],
+                ],
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: crafted)
+
+        XCTAssertThrowsError(
+            try JSONDecoder.agentHub.decode(IPCEnvelope<DaemonCommand>.self, from: data)
+        )
+    }
+
+    func testProviderConfigurationAndNativeInteractionCommandsRoundTrip() throws {
+        let plan = NativeInteractionPlan(
+            id: UUID(),
+            provider: .claude,
+            requestID: UUID(),
+            bundleID: "com.anthropic.claudefordesktop",
+            windowHint: nil,
+            sessionNativeID: "abc123",
+            promptFingerprint: "fingerprint",
+            operation: .choose(label: "Yes")
+        )
+        let commands: [DaemonCommand] = [
+            .configureProvider(.claude, .installHooks),
+            .nativeInteractionStarted(requestID: plan.requestID, planID: plan.id),
+        ]
+
+        let decoded = try commands.map { command in
+            let data = try JSONLineCodec.encode(IPCEnvelope(body: command))
+            return try JSONDecoder.agentHub.decode(
+                IPCEnvelope<DaemonCommand>.self,
+                from: data
+            )
+        }
+
+        XCTAssertTrue(decoded.allSatisfy { $0.protocolVersion == 3 })
+        guard case .configureProvider(.claude, let action) = decoded[0].body else {
+            return XCTFail("configure command did not round trip")
+        }
+        XCTAssertEqual(action, .installHooks)
+
+        let replies: [DaemonReply] = [
+            .components([
+                ProviderComponentStatus(
+                    provider: .claude,
+                    component: "hooks",
+                    available: true,
+                    version: "2.1.228",
+                    path: "/tmp/agenthub-claude-hook",
+                    message: nil,
+                    changedAt: Date(timeIntervalSince1970: 1)
+                ),
+            ]),
+            .nativeInteraction(plan),
+        ]
+        for reply in replies {
+            let data = try JSONEncoder.agentHub.encode(reply)
+            XCTAssertEqual(try JSONDecoder.agentHub.decode(DaemonReply.self, from: data), reply)
+        }
+    }
+
+    func testProtocolRoundTripsProviderAndEndpointCommands() throws {
         let attachment = ProviderEndpointAttachment(
             provider: .openCode,
             baseURL: "http://127.0.0.1:41789",
@@ -102,7 +200,7 @@ final class IPCTests: XCTestCase {
             )
         }
 
-        XCTAssertTrue(decoded.allSatisfy { $0.protocolVersion == 2 })
+        XCTAssertTrue(decoded.allSatisfy { $0.protocolVersion == 3 })
         guard case .launch(.openCode, let request) = decoded[0].body else {
             return XCTFail("launch command did not round trip")
         }

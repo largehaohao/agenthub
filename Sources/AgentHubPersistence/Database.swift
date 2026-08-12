@@ -85,6 +85,14 @@ enum AgentHubDatabase {
                 table.column("body", .blob).notNull()
             }
         }
+        migrator.registerMigration("provider-components-v3") { database in
+            try database.create(table: "provider_components") { table in
+                table.column("id", .text).primaryKey()
+                table.column("provider", .text).notNull()
+                table.column("component", .text).notNull()
+                table.column("body", .blob).notNull()
+            }
+        }
         return migrator
     }
 }
