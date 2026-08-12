@@ -10,7 +10,7 @@ public enum CursorAdapterError: Error, Equatable, Sendable {
 
 /// Normalizes local Cursor IDE Agent Chat hooks into AgentHub sessions,
 /// nodes, and permission requests. There is no managed launch path.
-public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderConfigurableAdapter {
+public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermissionProducingAdapter, ProviderConfigurableAdapter {
     public nonisolated var provider: Provider { .cursor }
 
     /// Verified Cursor.app bundle id on macOS (Cursor / Todesktop wrapper).
@@ -60,6 +60,12 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         self.hookInstaller = hookInstaller
         self.makeSessionID = makeSessionID
         self.now = now
+    }
+
+    public func takeLastPermissionRequestID() async -> UUID? {
+        let id = lastPermissionRequestID
+        lastPermissionRequestID = nil
+        return id
     }
 
     public func capabilities() async -> [Capability: ReliabilityLevel] {

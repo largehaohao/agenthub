@@ -36,6 +36,12 @@ public protocol HookEventIngestingAdapter: AgentAdapter {
     func ingest(_ envelope: ProviderHookEnvelope) async throws
 }
 
+/// Adapters that create sync permission requests during ingest expose the
+/// AgentHub request id so the hook bridge can await a decision.
+public protocol HookPermissionProducingAdapter: HookEventIngestingAdapter {
+    func takeLastPermissionRequestID() async -> UUID?
+}
+
 public protocol ProviderConfigurableAdapter: AgentAdapter {
     /// Performs an explicit setup action and returns the resulting component
     /// health, so a caller never has to assume the action took effect.

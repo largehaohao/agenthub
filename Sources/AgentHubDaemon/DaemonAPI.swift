@@ -83,7 +83,9 @@ public actor DaemonAPI {
                 return .jump(try await coordinator.jumpTarget(for: sessionID))
 
             case .ingestProviderHook(let hook):
-                try await coordinator.ingest(hook)
+                if let requestID = try await coordinator.ingest(hook) {
+                    return .accepted(requestID)
+                }
                 return .completed
 
             case .configureProvider(let provider, let action):

@@ -178,7 +178,9 @@ public actor Coordinator {
 
     /// Routes a provider hook to its owning adapter. A hook whose provider does
     /// not match the adapter it would reach is rejected rather than ingested.
-    public func ingest(_ hook: ProviderHookEnvelope) async throws {
+    /// Returns a pending permission request id when the adapter created one.
+    @discardableResult
+    public func ingest(_ hook: ProviderHookEnvelope) async throws -> UUID? {
         guard let adapter = adapters[hook.provider] else {
             throw CoordinatorError.unsupportedProvider
         }
@@ -188,6 +190,10 @@ public actor Coordinator {
         }
         try await ingesting.ingest(hook)
         try await reconcileAdapter(hook.provider)
+        if let producing = ingesting as? any HookPermissionProducingAdapter {
+            return await producing.takeLastPermissionRequestID()
+        }
+        return nil
     }
 
     public func configure(

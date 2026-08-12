@@ -21,6 +21,7 @@ let package = Package(
             name: "agenthub-claude-statusline",
             targets: ["agenthub-claude-statusline"]
         ),
+        .executable(name: "agenthub-cursor-hook", targets: ["agenthub-cursor-hook"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.10.0"),
@@ -65,6 +66,7 @@ let package = Package(
                 "AgentHubSecurity",
                 "AgentHubOpenCode",
                 "AgentHubClaude",
+                "AgentHubCursor",
             ]
         ),
         .target(name: "AgentHubTestSupport", dependencies: ["AgentHubCore"]),
@@ -87,6 +89,7 @@ let package = Package(
                 "AgentHubSecurity",
                 "AgentHubOpenCode",
                 "AgentHubClaude",
+                "AgentHubCursor",
                 "AgentHubDaemon",
             ]
         ),
@@ -117,6 +120,10 @@ let package = Package(
         .executableTarget(
             name: "agenthub-claude-statusline",
             dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubIPC"]
+        ),
+        .executableTarget(
+            name: "agenthub-cursor-hook",
+            dependencies: ["AgentHubCursor", "AgentHubCore", "AgentHubIPC"]
         ),
         .testTarget(
             name: "AgentHubClaudeTests",
@@ -149,6 +156,7 @@ let package = Package(
                 "AgentHubTestSupport",
                 "AgentHubOpenCode",
                 "AgentHubClaude",
+                "AgentHubCursor",
                 "AgentHubSecurity",
                 "AgentHubOpenCodeTestSupport",
             ]
