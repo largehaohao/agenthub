@@ -12,16 +12,7 @@ import AgentHubIPC
 private let endToEndTimeout: Duration = .milliseconds(500)
 
 private func socketPath() throws -> String {
-    let applicationSupport = try FileManager.default.url(
-        for: .applicationSupportDirectory,
-        in: .userDomainMask,
-        appropriateFor: nil,
-        create: false
-    )
-    return applicationSupport
-        .appendingPathComponent("AgentHub", isDirectory: true)
-        .appendingPathComponent("agenthub.sock")
-        .path
+    try ClaudeHelperSocket.resolve()
 }
 
 private func readBoundedStdin() -> Data {

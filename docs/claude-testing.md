@@ -120,3 +120,20 @@ Desktop is not covered.
 
 Default tests use fixtures only and never invoke Claude or write a real status
 line.
+
+### Verifying delivery end to end
+
+The helpers resolve the daemon socket from Application Support, which macOS
+derives from the user record rather than `HOME`. `AGENTHUB_SOCKET` overrides
+that path so real delivery can be exercised against a throwaway daemon instead
+of the user's live one. It exists for tests and local debugging; normal runs
+leave it unset and use the real socket.
+
+```bash
+swift build --product agenthub-claude-statusline
+AGENTHUB_LIVE_CLAUDE_SMOKE=1 swift test --filter ClaudeStatusLineDeliveryTests
+```
+
+That spawns the real reporter binary, points it at a temporary socket bound by a
+real daemon server, and asserts the payload arrives intact — and that the
+reporter still exits zero when nothing is listening.
