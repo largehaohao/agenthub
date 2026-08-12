@@ -23,8 +23,11 @@ actor TestAdapter: EndpointConfigurableAdapter {
         }
         return snapshotToReturn.sessions.first?.providerRef ?? .fixture()
     }
+    private(set) var reconcileCount = 0
+
     func reconcile() async throws -> AdapterSnapshot {
         restoredEndpointCountAtReconcile = restoredEndpoints.count
+        reconcileCount += 1
         return snapshotToReturn
     }
     func eventStream() async -> AsyncStream<AgentEvent> { AsyncStream { $0.finish() } }

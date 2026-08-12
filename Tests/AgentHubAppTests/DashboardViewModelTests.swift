@@ -171,9 +171,57 @@ final class DashboardViewModelTests: XCTestCase {
 
         let item = QuotaPresentation(window: window, now: now)
 
-        XCTAssertEqual(item.title, "Claude · Weekly")
+        // Provider-specific wording ("Weekly") is replaced by the duration so
+        // the same window reads identically across providers.
+        XCTAssertEqual(item.title, "7d")
         XCTAssertEqual(item.accountPlan, "user@example.com · Pro")
         XCTAssertTrue(item.isStale)
+    }
+
+    func testClaudeSessionWindowIsNamedByDuration() throws {
+        let now = Date(timeIntervalSince1970: 1_100)
+        let window = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "five_hour",
+            label: "Session",
+            plan: "Pro",
+            usedPercent: 55,
+            windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: Date(timeIntervalSince1970: 1_000),
+            source: "claude-statusline"
+        )
+
+        XCTAssertEqual(QuotaPresentation(window: window, now: now).title, "5h")
+    }
+
+    func testQuotaRowsGroupByProviderAndSortShortestWindowFirst() throws {
+        let now = Date(timeIntervalSince1970: 1_100)
+        let fetched = Date(timeIntervalSince1970: 1_000)
+        let claudeWeek = try QuotaWindow(
+            provider: .claude, accountID: "a", windowID: "seven_day", label: "Weekly",
+            usedPercent: 43, windowDuration: 604_800,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: fetched, source: "claude-statusline"
+        )
+        let claudeSession = try QuotaWindow(
+            provider: .claude, accountID: "a", windowID: "five_hour", label: "Session",
+            usedPercent: 55, windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: fetched, source: "claude-statusline"
+        )
+        let codex = try QuotaWindow(
+            provider: .codex, accountID: "b", usedPercent: 98, windowDuration: 604_800,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: fetched, source: "codex-app-server"
+        )
+
+        let rows = QuotaProviderRow.rows(from: [claudeWeek, codex, claudeSession], now: now)
+
+        XCTAssertEqual(rows.map(\.provider), [.claude, .codex])
+        XCTAssertEqual(rows[0].windows.map(\.title), ["5h", "7d"])
+        XCTAssertEqual(rows[1].windows.map(\.title), ["7d"])
     }
 
     func testUnlabeledQuotaPresentationFallsBackToDuration() throws {
@@ -190,7 +238,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         let item = QuotaPresentation(window: window, now: now)
 
-        XCTAssertEqual(item.title, "Codex · 5h")
+        XCTAssertEqual(item.title, "5h")
         XCTAssertEqual(item.accountPlan, "personal")
         XCTAssertFalse(item.isStale)
     }

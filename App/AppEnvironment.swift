@@ -202,7 +202,7 @@ private actor FixtureDaemonClient: DaemonClientProtocol {
 
     func send(_ command: DaemonCommand) async throws -> DaemonReply {
         switch command {
-        case .getSnapshot:
+        case .getSnapshot, .refreshQuotas:
             return .snapshot(state)
         case .resolveRequest(let id, _):
             if var request = state.requests[id] {

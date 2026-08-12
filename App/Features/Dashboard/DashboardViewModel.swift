@@ -10,6 +10,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var selectedSessionID: UUID?
     @Published private(set) var connection: ConnectionState = .connecting
     @Published private(set) var message: String?
+    /// Drives the refresh button's spinner and prevents overlapping refreshes.
+    @Published private(set) var isRefreshingQuotas = false
 
     private let client: any DaemonClientProtocol
     private let jumpOpener: any JumpOpening
@@ -236,6 +238,26 @@ final class DashboardViewModel: ObservableObject {
             }
         } catch {
             message = "Unable to update \(provider.displayName) setup"
+        }
+    }
+
+    /// Re-queries every provider for current quota. Bound to the refresh button
+    /// so the user is never stuck looking at a stale number until the next
+    /// interval tick.
+    func refreshQuotas() async {
+        guard !isRefreshingQuotas else { return }
+        isRefreshingQuotas = true
+        defer { isRefreshingQuotas = false }
+        do {
+            let reply = try await client.send(.refreshQuotas)
+            guard case .snapshot(let snapshot) = reply else {
+                message = reply.failureMessage ?? "Unable to refresh quota"
+                return
+            }
+            message = nil
+            state = snapshot
+        } catch {
+            message = "Unable to refresh quota"
         }
     }
 

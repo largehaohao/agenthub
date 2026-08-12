@@ -165,9 +165,10 @@ public actor CodexAdapter: AgentAdapter {
             timeout: .seconds(3)
         )
         guard let snapshot = result["rateLimits"] else { return [] }
-        return try [snapshot["primary"], snapshot["secondary"]]
-            .compactMap { $0 }
-            .compactMap(makeQuotaWindow)
+        let plan = snapshot["plan_type"]?.stringValue ?? snapshot["planType"]?.stringValue
+        return try [("primary", snapshot["primary"]), ("secondary", snapshot["secondary"])]
+            .compactMap { name, value in value.map { (name, $0) } }
+            .compactMap { try makeQuotaWindow($0.1, windowID: $0.0, plan: plan) }
     }
 
     private func makeSession(_ thread: CodexThread, id: UUID) -> AgentSession {
@@ -210,13 +211,28 @@ public actor CodexAdapter: AgentAdapter {
         return VisibleTurn(id: id, role: "assistant", text: text, createdAt: created)
     }
 
-    private func makeQuotaWindow(_ value: JSONValue) throws -> QuotaWindow? {
-        guard let used = value["usedPercent"]?.numberValue,
-              let durationMinutes = value["windowDurationMins"]?.numberValue,
-              let reset = value["resetsAt"]?.numberValue else { return nil }
+    /// Codex reports snake_case (`used_percent`, `window_minutes`, `resets_at`).
+    /// Both spellings are accepted so a future or older camelCase server still
+    /// parses rather than silently yielding no windows.
+    private func makeQuotaWindow(
+        _ value: JSONValue,
+        windowID: String,
+        plan: String?
+    ) throws -> QuotaWindow? {
+        guard let used = value["used_percent"]?.numberValue
+                ?? value["usedPercent"]?.numberValue,
+              let durationMinutes = value["window_minutes"]?.numberValue
+                ?? value["windowDurationMins"]?.numberValue,
+              let reset = value["resets_at"]?.numberValue
+                ?? value["resetsAt"]?.numberValue else { return nil }
         return try QuotaWindow(
             provider: .codex,
             accountID: accountID,
+            // Without a window ID both entries collapse onto one row when they
+            // happen to share a duration.
+            windowID: windowID,
+            label: QuotaWindow.durationLabel(durationMinutes * 60),
+            plan: plan,
             usedPercent: used,
             windowDuration: durationMinutes * 60,
             resetsAt: Date(timeIntervalSince1970: reset),

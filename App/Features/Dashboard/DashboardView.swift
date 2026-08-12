@@ -15,7 +15,11 @@ struct DashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             AdapterHealthView(health: model.state.adapterHealth)
-            QuotaStripView(quotas: Array(model.state.quotas.values))
+            QuotaStripView(
+                quotas: Array(model.state.quotas.values),
+                isRefreshing: model.isRefreshingQuotas,
+                onRefresh: { Task { await model.refreshQuotas() } }
+            )
             Divider()
             NavigationSplitView {
                 SessionTreeView(

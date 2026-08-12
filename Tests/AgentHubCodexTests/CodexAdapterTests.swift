@@ -42,6 +42,32 @@ final class CodexAdapterTests: XCTestCase {
         XCTAssertEqual(windows.map(\.usedPercent).sorted(), [25, 40])
     }
 
+    /// Real Codex reports snake_case `used_percent` / `window_minutes` /
+    /// `resets_at`. Reading camelCase silently produced no windows at all, so
+    /// the strip showed a stale value from an earlier source.
+    func testLiveSnakeCaseRateLimitsAreParsed() async throws {
+        let result = try fixture(named: "rate-limits-live")
+        let transport = MethodResponseTransport(responses: ["account/rateLimits/read": result])
+        let adapter = CodexAdapter(
+            accountID: "personal",
+            rpc: CodexRPCClient(transport: transport),
+            now: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let windows = try await adapter.quotaWindows()
+
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(windows.map(\.usedPercent).sorted(), [12.5, 98])
+        XCTAssertEqual(
+            Set(windows.map(\.windowDuration)),
+            [300 * 60, 10_080 * 60]
+        )
+        // Distinct window IDs keep the 5h and 7d rows from colliding on one id.
+        XCTAssertEqual(windows.compactMap(\.windowID).count, 2)
+        XCTAssertEqual(Set(windows.map(\.id)).count, 2)
+        XCTAssertTrue(windows.allSatisfy { $0.plan == "plus" })
+    }
+
     func testReconcileIncludesAvailableQuotaWindows() async throws {
         let transport = MethodResponseTransport(responses: [
             "thread/list": try fixture(named: "thread-status"),

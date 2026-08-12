@@ -33,6 +33,7 @@ public enum DaemonCommand: Codable, Sendable {
     case configureProvider(Provider, ProviderConfigurationAction)
     case nativeInteractionStarted(requestID: UUID, planID: UUID)
     case awaitHookPermission(requestID: UUID, timeoutMilliseconds: Int)
+    case refreshQuotas
 }
 
 public enum DaemonReply: Codable, Equatable, Sendable {

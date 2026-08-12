@@ -20,13 +20,18 @@ public actor Coordinator {
     private var eventTasks: [Task<Void, Never>] = []
     private var sequence: UInt64 = 0
     private var started = false
+    /// Shorter than the 15-minute staleness TTL so windows are refreshed before
+    /// they stop informing recommendations. `.zero` disables the loop in tests.
+    private let quotaRefreshInterval: Duration
 
     public init(
         store: AgentHubStore,
-        adapters: [Provider: any AgentAdapter]
+        adapters: [Provider: any AgentAdapter],
+        quotaRefreshInterval: Duration = .seconds(300)
     ) {
         self.store = store
         self.adapters = adapters
+        self.quotaRefreshInterval = quotaRefreshInterval
         let pair = AsyncStream<UInt64>.makeStream()
         changeStream = pair.stream
         changeContinuation = pair.continuation
@@ -89,6 +94,24 @@ public actor Coordinator {
             }
             eventTasks.append(task)
         }
+
+        startQuotaRefreshLoop()
+    }
+
+    /// Quota windows go stale after 15 minutes and are then excluded from
+    /// recommendations, so they are re-fetched on a shorter interval than the
+    /// TTL. Registered in `eventTasks` so `stop()` cancels it.
+    private func startQuotaRefreshLoop() {
+        guard quotaRefreshInterval > .zero else { return }
+        let interval = quotaRefreshInterval
+        let task = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let self else { return }
+                try? await self.refreshQuotas()
+            }
+        }
+        eventTasks.append(task)
     }
 
     public func stop() async {
@@ -281,6 +304,40 @@ public actor Coordinator {
         try await merge(snapshot, provider: provider, publish: true)
     }
 
+    /// Re-queries every adapter so quota windows stop aging past their TTL.
+    ///
+    /// A provider that is down must not block the others, so each failure is
+    /// recorded as adapter health and the loop continues; the previous value is
+    /// preserved as stale rather than being replaced with zero.
+    public func refreshQuotas() async throws {
+        for provider in adapters.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            guard let adapter = adapters[provider] else { continue }
+            do {
+                let snapshot = try await adapter.reconcile()
+                try await merge(snapshot, provider: provider, publish: true)
+                try await persistAndReduce(
+                    .adapterHealth(
+                        provider,
+                        AdapterHealth(connected: true, changedAt: Date())
+                    ),
+                    publish: true
+                )
+            } catch {
+                try await persistAndReduce(
+                    .adapterHealth(
+                        provider,
+                        AdapterHealth(
+                            connected: false,
+                            message: "Quota refresh failed",
+                            changedAt: Date()
+                        )
+                    ),
+                    publish: true
+                )
+            }
+        }
+    }
+
     private func merge(
         _ snapshot: AdapterSnapshot,
         provider: Provider,
@@ -308,6 +365,20 @@ public actor Coordinator {
         }
         for quota in snapshot.quotas {
             try await persistAndReduce(.quotaUpserted(quota), publish: publish)
+        }
+        // A window's id embeds its windowID, so a provider that starts naming a
+        // previously unnamed window would leave the old row behind and
+        // double-count. Only prune when this provider actually reported
+        // windows: an empty list means "unavailable", and §11 requires the last
+        // value be preserved as stale rather than dropped.
+        if !snapshot.quotas.isEmpty {
+            let reported = Set(snapshot.quotas.map(\.id))
+            let superseded = state.quotas.values
+                .filter { $0.provider == provider && !reported.contains($0.id) }
+                .map(\.id)
+            for id in superseded {
+                try await persistAndReduce(.quotaRemoved(id: id), publish: publish)
+            }
         }
         for endpoint in snapshot.endpoints {
             try await persistAndReduce(.endpointUpserted(endpoint), publish: publish)

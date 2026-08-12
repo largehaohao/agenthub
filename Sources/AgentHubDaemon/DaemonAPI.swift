@@ -23,6 +23,10 @@ public actor DaemonAPI {
             case .getSnapshot:
                 return .snapshot(await coordinator.snapshot())
 
+            case .refreshQuotas:
+                try await coordinator.refreshQuotas()
+                return .snapshot(await coordinator.snapshot())
+
             case .launch(let provider, let request):
                 return .accepted(try await coordinator.launch(provider: provider, request: request))
 
@@ -130,6 +134,7 @@ public actor DaemonAPI {
         case .configureProvider(let provider, _): "Unable to configure \(provider.rawValue)"
         case .nativeInteractionStarted: "Unable to record native interaction"
         case .awaitHookPermission: "Unable to await hook permission"
+        case .refreshQuotas: "Unable to refresh quota"
         }
     }
 }

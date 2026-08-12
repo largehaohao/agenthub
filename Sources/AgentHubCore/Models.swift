@@ -596,6 +596,19 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
         now.timeIntervalSince(fetchedAt) > (sourceTTL ?? 15 * 60)
     }
 
+    /// Canonical window name. Providers name the same window differently
+    /// ("Session", "Weekly", "primary"), so the duration is the one description
+    /// that means the same thing everywhere: 5h, 7d.
+    public static func durationLabel(_ duration: TimeInterval) -> String {
+        let hours = Int((duration / 3_600).rounded())
+        guard hours >= 24 else { return "\(hours)h" }
+        let days = Int((duration / 86_400).rounded())
+        return "\(days)d"
+    }
+
+    /// Duration-derived name, ignoring the provider's own wording.
+    public var canonicalLabel: String { Self.durationLabel(windowDuration) }
+
     public func availablePace(now: Date) -> Double? {
         guard !isStale(now: now) else { return nil }
 

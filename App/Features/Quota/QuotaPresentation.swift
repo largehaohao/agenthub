@@ -5,6 +5,8 @@ import AgentHubCore
 /// lets the labelling and staleness rules be tested without SwiftUI.
 struct QuotaPresentation: Identifiable, Equatable {
     let id: String
+    /// Duration-derived window name only ("5h", "7d"). The provider is shown
+    /// once per row, so repeating it on every window is noise.
     let title: String
     let accountPlan: String
     let usedPercent: Double
@@ -13,11 +15,11 @@ struct QuotaPresentation: Identifiable, Equatable {
     let isStale: Bool
 
     init(window: QuotaWindow, now: Date) {
-        // A source-provided label is the most accurate description; duration is
-        // only a fallback for providers that do not name their windows.
-        let name = window.label ?? Self.durationLabel(window.windowDuration)
+        // Providers name the same window differently ("Session", "Weekly",
+        // "primary"). The duration is the one description that means the same
+        // thing across providers, so it is the canonical name.
         id = window.id
-        title = "\(window.provider.rawValue.capitalized) · \(name)"
+        title = window.canonicalLabel
         accountPlan = [window.accountID, window.plan]
             .compactMap { $0 }
             .joined(separator: " · ")
@@ -31,7 +33,31 @@ struct QuotaPresentation: Identifiable, Equatable {
     var informsRecommendations: Bool { !isStale }
 
     static func durationLabel(_ duration: TimeInterval) -> String {
-        let hours = Int(duration / 3_600)
-        return hours >= 24 ? "\(hours / 24)d" : "\(hours)h"
+        QuotaWindow.durationLabel(duration)
+    }
+}
+
+/// One provider's windows, rendered as a single row.
+struct QuotaProviderRow: Identifiable, Equatable {
+    let id: String
+    let provider: Provider
+    let windows: [QuotaPresentation]
+
+    var displayName: String { provider.displayName }
+
+    /// Groups windows by provider and orders each row shortest-window-first, so
+    /// the fastest-moving number is read first.
+    static func rows(from quotas: [QuotaWindow], now: Date) -> [QuotaProviderRow] {
+        Dictionary(grouping: quotas, by: \.provider)
+            .map { provider, windows in
+                QuotaProviderRow(
+                    id: provider.rawValue,
+                    provider: provider,
+                    windows: windows
+                        .sorted { $0.windowDuration < $1.windowDuration }
+                        .map { QuotaPresentation(window: $0, now: now) }
+                )
+            }
+            .sorted { $0.provider.rawValue < $1.provider.rawValue }
     }
 }
