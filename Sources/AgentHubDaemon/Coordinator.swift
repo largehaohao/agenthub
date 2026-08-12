@@ -176,6 +176,32 @@ public actor Coordinator {
         publishChange()
     }
 
+    /// Routes a provider hook to its owning adapter. A hook whose provider does
+    /// not match the adapter it would reach is rejected rather than ingested.
+    public func ingest(_ hook: ProviderHookEnvelope) async throws {
+        guard let adapter = adapters[hook.provider] else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        guard let ingesting = adapter as? any HookEventIngestingAdapter,
+              ingesting.provider == hook.provider else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        try await ingesting.ingest(hook)
+        try await reconcileAdapter(hook.provider)
+    }
+
+    public func configure(
+        provider: Provider,
+        action: ProviderConfigurationAction
+    ) async throws -> [ProviderComponentStatus] {
+        guard let adapter = adapters[provider],
+              let configurable = adapter as? any ProviderConfigurableAdapter else {
+            throw CoordinatorError.unsupportedProvider
+        }
+        try await configurable.configure(action)
+        return Array(state.components.values)
+    }
+
     public func send(_ input: AgentInput, to sessionID: UUID) async throws {
         guard let session = state.sessions[sessionID] else {
             throw CoordinatorError.sessionNotFound
@@ -236,6 +262,12 @@ public actor Coordinator {
         }
         try await configurable.detachEndpoint(id: id)
         try await persistAndReduce(.endpointRemoved(id), publish: true)
+    }
+
+    private func reconcileAdapter(_ provider: Provider) async throws {
+        guard let adapter = adapters[provider] else { return }
+        let snapshot = try await adapter.reconcile()
+        try await merge(snapshot, provider: provider, publish: true)
     }
 
     private func merge(

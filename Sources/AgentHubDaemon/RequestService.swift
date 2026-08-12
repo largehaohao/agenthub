@@ -8,9 +8,20 @@ public enum RequestServiceError: Error, Equatable, Sendable {
     case unsupportedProvider
 }
 
+/// What resolving a request produced.
+public enum RequestResolutionOutcome: Equatable, Sendable {
+    /// The provider acknowledged the decision and local state converged.
+    case resolved
+    /// The app must perform a verified native UI action before the request
+    /// advances; it stays pending until the app reports back.
+    case native(NativeInteractionPlan)
+}
+
 public actor RequestService {
     private let store: AgentHubStore
     private let adapters: [Provider: any AgentAdapter]
+    /// Native plans awaiting confirmation that the app acted on the real UI.
+    private var pendingNativePlans: [UUID: NativeInteractionPlan] = [:]
 
     public init(
         store: AgentHubStore,
@@ -20,7 +31,11 @@ public actor RequestService {
         self.adapters = adapters
     }
 
-    public func resolve(id: UUID, decision: RequestDecision) async throws {
+    @discardableResult
+    public func resolve(
+        id: UUID,
+        decision: RequestDecision
+    ) async throws -> RequestResolutionOutcome {
         let snapshot = try await store.snapshot()
         guard let request = snapshot.requests[id] else {
             throw RequestServiceError.notFound
@@ -32,7 +47,6 @@ public actor RequestService {
             throw RequestServiceError.unsupportedProvider
         }
 
-        try await store.apply(.requestResolutionStarted(id: id))
         let reference = ProviderRequestRef(
             provider: request.provider,
             requestID: request.providerRequestID,
@@ -40,6 +54,15 @@ public actor RequestService {
             turnID: request.turnID,
             itemID: request.itemID
         )
+
+        // A native route hands the action to the app. Persisted state must not
+        // move yet: only the app can confirm the real UI was driven.
+        if case .native(let plan) = try await adapter.resolutionRoute(reference, decision: decision) {
+            pendingNativePlans[id] = plan
+            return .native(plan)
+        }
+
+        try await store.apply(.requestResolutionStarted(id: id))
         do {
             try await adapter.resolve(reference, decision: decision)
         } catch AdapterOperationError.requestAlreadyResolved {
@@ -50,6 +73,22 @@ public actor RequestService {
             action: "request.resolved",
             provider: request.provider.rawValue,
             sessionID: request.sessionID
+        ))
+        return .resolved
+    }
+
+    /// Advances a native request only when the app reports the exact request
+    /// and plan it was handed, so a stale or forged report cannot move state.
+    public func nativeInteractionStarted(requestID: UUID, planID: UUID) async throws {
+        guard let plan = pendingNativePlans[requestID], plan.id == planID else {
+            throw RequestServiceError.notFound
+        }
+        pendingNativePlans.removeValue(forKey: requestID)
+        try await store.apply(.requestResolutionStarted(id: requestID))
+        try await store.appendAudit(AuditEvent(
+            action: "request.native-interaction",
+            provider: plan.provider.rawValue,
+            sessionID: nil
         ))
     }
 }

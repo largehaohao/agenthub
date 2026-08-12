@@ -37,8 +37,11 @@ public actor DaemonAPI {
                 return .completed
 
             case .resolveRequest(let id, let decision):
-                try await requests.resolve(id: id, decision: decision)
+                let outcome = try await requests.resolve(id: id, decision: decision)
                 try await coordinator.refreshFromStore()
+                if case .native(let plan) = outcome {
+                    return .nativeInteraction(plan)
+                }
                 return .accepted(id)
 
             case .sendInput(let sessionID, let input):
@@ -79,10 +82,24 @@ public actor DaemonAPI {
             case .jumpTarget(let sessionID):
                 return .jump(try await coordinator.jumpTarget(for: sessionID))
 
-            // Transport exists ahead of provider routing; wired up with the
-            // Claude adapter.
-            case .ingestProviderHook, .configureProvider, .nativeInteractionStarted:
-                return .failure(publicFailure(for: command))
+            case .ingestProviderHook(let hook):
+                try await coordinator.ingest(hook)
+                return .completed
+
+            case .configureProvider(let provider, let action):
+                let components = try await coordinator.configure(
+                    provider: provider,
+                    action: action
+                )
+                return .components(components)
+
+            case .nativeInteractionStarted(let requestID, let planID):
+                try await requests.nativeInteractionStarted(
+                    requestID: requestID,
+                    planID: planID
+                )
+                try await coordinator.refreshFromStore()
+                return .completed
             }
         } catch {
             return .failure(publicFailure(for: command))

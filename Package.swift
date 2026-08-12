@@ -58,6 +58,7 @@ let package = Package(
                 "AgentHubCodex",
                 "AgentHubSecurity",
                 "AgentHubOpenCode",
+                "AgentHubClaude",
             ]
         ),
         .target(name: "AgentHubTestSupport", dependencies: ["AgentHubCore"]),
@@ -79,6 +80,7 @@ let package = Package(
                 "AgentHubCodex",
                 "AgentHubSecurity",
                 "AgentHubOpenCode",
+                "AgentHubClaude",
                 "AgentHubDaemon",
             ]
         ),
@@ -132,6 +134,7 @@ let package = Package(
                 "AgentHubPersistence",
                 "AgentHubTestSupport",
                 "AgentHubOpenCode",
+                "AgentHubClaude",
                 "AgentHubSecurity",
                 "AgentHubOpenCodeTestSupport",
             ]

@@ -96,10 +96,13 @@ public extension AgentNode {
 }
 
 public extension PendingRequest {
-    static func fixture(state: RequestState = .pending) -> PendingRequest {
+    static func fixture(
+        state: RequestState = .pending,
+        provider: Provider = .codex
+    ) -> PendingRequest {
         PendingRequest(
             id: FixtureValues.requestID,
-            provider: .codex,
+            provider: provider,
             providerRequestID: "approval-1",
             sessionID: FixtureValues.sessionID,
             threadID: "codex-1",

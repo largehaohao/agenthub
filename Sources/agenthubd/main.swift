@@ -1,6 +1,7 @@
 import Darwin
 import Dispatch
 import Foundation
+import AgentHubClaude
 import AgentHubCodex
 import AgentHubCore
 import AgentHubDaemon
@@ -28,6 +29,63 @@ private struct DaemonPaths {
             socket: directory.appendingPathComponent("agenthub.sock").path
         )
     }
+}
+
+/// Builds the managed-terminal runtime only when Claude, tmux, and osascript
+/// are all present. Without them Claude sessions are still discovered through
+/// hooks; only managed launch is unavailable.
+private func resolvedClaudeTerminal() -> TmuxClaudeTerminalRuntime? {
+    let candidates = [
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/claude"),
+        URL(fileURLWithPath: "/opt/homebrew/bin/claude"),
+        URL(fileURLWithPath: "/usr/local/bin/claude"),
+    ]
+    let tmuxCandidates = [
+        URL(fileURLWithPath: "/opt/homebrew/bin/tmux"),
+        URL(fileURLWithPath: "/usr/local/bin/tmux"),
+        URL(fileURLWithPath: "/usr/bin/tmux"),
+    ]
+
+    guard let claude = candidates.first(where: {
+        FileManager.default.isExecutableFile(atPath: $0.path)
+    }), let tmux = tmuxCandidates.first(where: {
+        FileManager.default.isExecutableFile(atPath: $0.path)
+    }) else { return nil }
+
+    return TmuxClaudeTerminalRuntime(
+        claudeExecutable: claude,
+        tmuxExecutable: tmux,
+        run: runClaudeCommand
+    )
+}
+
+/// Executes a command directly with an argument array; no shell is involved.
+@Sendable
+private func runClaudeCommand(_ command: ClaudeCommand) async throws -> ClaudeCommandResult {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: command.executable)
+    process.arguments = command.arguments
+    process.standardOutput = output
+    process.standardError = Pipe()
+
+    if let standardInput = command.standardInput {
+        let input = Pipe()
+        process.standardInput = input
+        try process.run()
+        input.fileHandleForWriting.write(Data(standardInput.utf8))
+        try? input.fileHandleForWriting.close()
+    } else {
+        try process.run()
+    }
+
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return ClaudeCommandResult(
+        standardOutput: String(decoding: data, as: UTF8.self),
+        exitStatus: process.terminationStatus
+    )
 }
 
 private func prepareDirectory(_ url: URL, fileManager: FileManager = .default) throws {
@@ -81,9 +139,18 @@ private func runDaemon(paths: DaemonPaths) async throws {
         discovery: openCodeDiscovery,
         credentialStore: credentialStore
     )
+    let claudeAdapter = ClaudeAdapter(
+        accountID: "default",
+        transcripts: ClaudeTranscriptReader(
+            claudeRoot: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude", isDirectory: true)
+        ),
+        terminal: resolvedClaudeTerminal()
+    )
     let adapters: [Provider: any AgentAdapter] = [
         .codex: codexAdapter,
         .openCode: openCodeAdapter,
+        .claude: claudeAdapter,
     ]
     let coordinator = Coordinator(store: store, adapters: adapters)
     let requestService = RequestService(store: store, adapters: adapters)
