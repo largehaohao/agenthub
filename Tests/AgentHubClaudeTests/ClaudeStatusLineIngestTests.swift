@@ -100,6 +100,82 @@ final class ClaudeStatusLineIngestTests: XCTestCase {
         XCTAssertEqual(byID["seven_day"]?.usedPercent, 43, "updated to the new reading")
     }
 
+    /// The usage cache is pollable, so reconcile picks it up even when no
+    /// status line ever arrives.
+    func testReconcileReadsUsageCacheWhenNoStatusLineSeen() async throws {
+        let cache = try makeUsageCache(fiveHour: 33, fetchedAtMs: 1_786_532_498_571)
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            usageCacheReader: cache,
+            now: { Date(timeIntervalSince1970: 1_786_532_600) }
+        )
+
+        let snapshot = try await adapter.reconcile()
+
+        XCTAssertEqual(snapshot.quotas.count, 1)
+        XCTAssertEqual(snapshot.quotas.first?.usedPercent, 33)
+        XCTAssertEqual(snapshot.quotas.first?.source, "claude-usage-cache")
+    }
+
+    /// Both sources describe the same window; the newer observation wins so a
+    /// fresh status line is not overwritten by an older cached number.
+    func testNewerStatusLineWinsOverOlderCache() async throws {
+        let cache = try makeUsageCache(fiveHour: 33, fetchedAtMs: 1_000_000)
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            usageCacheReader: cache,
+            now: { Date(timeIntervalSince1970: 2_000) }
+        )
+        // observed_at is newer than the cache's fetchedAtMs.
+        try await adapter.ingest(try envelope(Data("""
+        {"session_id":"abc123","observed_at":9000000,
+        "rate_limits":{"five_hour":{"used_percentage":77,
+        "resets_at":"2026-08-12T14:50:00Z"}}}
+        """.utf8)))
+
+        let snapshot = try await adapter.reconcile()
+
+        let fiveHour = snapshot.quotas.filter { $0.windowID == "five_hour" }
+        XCTAssertEqual(fiveHour.count, 1, "one row per window, not one per source")
+        XCTAssertEqual(fiveHour.first?.usedPercent, 77)
+    }
+
+    func testNewerCacheWinsOverOlderStatusLine() async throws {
+        let cache = try makeUsageCache(fiveHour: 33, fetchedAtMs: 9_000_000_000)
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            usageCacheReader: cache,
+            now: { Date(timeIntervalSince1970: 2_000) }
+        )
+        try await adapter.ingest(try envelope(Data("""
+        {"session_id":"abc123","observed_at":1000,
+        "rate_limits":{"five_hour":{"used_percentage":77,
+        "resets_at":"2026-08-12T14:50:00Z"}}}
+        """.utf8)))
+
+        let snapshot = try await adapter.reconcile()
+
+        let fiveHour = snapshot.quotas.filter { $0.windowID == "five_hour" }
+        XCTAssertEqual(fiveHour.count, 1)
+        XCTAssertEqual(fiveHour.first?.usedPercent, 33)
+    }
+
+    private func makeUsageCache(
+        fiveHour: Double,
+        fetchedAtMs: Double
+    ) throws -> ClaudeUsageCacheReader {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agenthub-cache-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(".claude.json")
+        try Data("""
+        {"cachedUsageUtilization":{"fetchedAtMs":\(Int(fetchedAtMs)),
+        "utilization":{"five_hour":{"utilization":\(fiveHour),
+        "resets_at":"2026-08-12T14:50:00.458358+00:00"}}}}
+        """.utf8).write(to: url)
+        return ClaudeUsageCacheReader(fileURL: url, accountID: "personal")
+    }
+
     private func statusLineEnvelope(
         fiveHourPercent: Double = 42.5
     ) throws -> ProviderHookEnvelope {

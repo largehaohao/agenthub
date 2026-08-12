@@ -237,6 +237,66 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertTrue(item.informsRecommendations)
     }
 
+    /// Cursor reports Auto / API / Total over the same billing cycle, so the
+    /// duration alone would render three identical "31d" titles. The provider's
+    /// own label disambiguates them.
+    func testWindowsSharingADurationKeepTheirProviderLabel() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let resets = Date(timeIntervalSince1970: 2_700_000)
+        func window(_ id: String, _ label: String, _ pct: Double) throws -> QuotaWindow {
+            try QuotaWindow(
+                provider: .cursor, accountID: "a", windowID: id, label: label, plan: "pro",
+                usedPercent: pct, windowDuration: 31 * 24 * 3_600,
+                resetsAt: resets, fetchedAt: now, source: "cursor-dashboard"
+            )
+        }
+        let windows = [
+            try window("auto", "Auto", 0),
+            try window("api", "API", 39.353),
+            try window("total", "Total", 34.22),
+        ]
+
+        let rows = QuotaProviderRow.rows(from: windows, now: now)
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].windows.map(\.title), ["31d · Auto", "31d · API", "31d · Total"])
+    }
+
+    /// A provider whose windows all have distinct durations keeps the short
+    /// duration-only name.
+    func testWindowsWithDistinctDurationsStayDurationOnly() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let five = try QuotaWindow(
+            provider: .claude, accountID: "a", windowID: "five_hour", label: "Session",
+            usedPercent: 33, windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 90_000), fetchedAt: now,
+            source: "claude-usage-cache"
+        )
+        let week = try QuotaWindow(
+            provider: .claude, accountID: "a", windowID: "seven_day", label: "Weekly",
+            usedPercent: 46, windowDuration: 604_800,
+            resetsAt: Date(timeIntervalSince1970: 900_000), fetchedAt: now,
+            source: "claude-usage-cache"
+        )
+
+        let rows = QuotaProviderRow.rows(from: [week, five], now: now)
+
+        XCTAssertEqual(rows[0].windows.map(\.title), ["5h", "7d"])
+    }
+
+    /// Percentages are shown as whole numbers; Cursor reports long fractions.
+    func testFractionalPercentIsRoundedForDisplay() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let window = try QuotaWindow(
+            provider: .cursor, accountID: "a", windowID: "api", label: "API", plan: "pro",
+            usedPercent: 39.35333333333333, windowDuration: 31 * 24 * 3_600,
+            resetsAt: Date(timeIntervalSince1970: 2_700_000), fetchedAt: now,
+            source: "cursor-dashboard"
+        )
+
+        XCTAssertEqual(QuotaPresentation(window: window, now: now).displayPercent, "39%")
+    }
+
     func testQuotaRowsGroupByProviderAndSortShortestWindowFirst() throws {
         let now = Date(timeIntervalSince1970: 1_100)
         let fetched = Date(timeIntervalSince1970: 1_000)

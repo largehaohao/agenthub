@@ -59,6 +59,9 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     private let terminal: (any ClaudeTerminalControlling)?
     private let hookInstaller: ClaudeHookInstaller?
     private let statusLineInstaller: ClaudeStatusLineInstaller?
+    /// Claude Code's own usage cache. Pollable, unlike the status line, which
+    /// only reports while a session is rendering one.
+    private let usageCacheReader: ClaudeUsageCacheReader?
     private let executor = ClaudeManagedRequestExecutor()
     private let makeSessionID: @Sendable () -> UUID
     private let launchTimeout: Duration
@@ -84,6 +87,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         terminal: (any ClaudeTerminalControlling)? = nil,
         hookInstaller: ClaudeHookInstaller? = nil,
         statusLineInstaller: ClaudeStatusLineInstaller? = nil,
+        usageCacheReader: ClaudeUsageCacheReader? = nil,
         makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
         launchTimeout: Duration = .seconds(30),
         now: @escaping @Sendable () -> Date = { Date() }
@@ -95,6 +99,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         self.terminal = terminal
         self.hookInstaller = hookInstaller
         self.statusLineInstaller = statusLineInstaller
+        self.usageCacheReader = usageCacheReader
         self.makeSessionID = makeSessionID
         self.launchTimeout = launchTimeout
         self.now = now
@@ -427,10 +432,30 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             sessions: sessions.values.map(session(from:)),
             nodes: Array(nodes.values),
             requests: requests.values.map(pendingRequest(from:)),
-            quotas: quotas,
+            quotas: mergedQuotas(),
             endpoints: [],
             requestsAreAuthoritative: true
         )
+    }
+
+    /// Combines status-line readings with Claude Code's usage cache.
+    ///
+    /// Both describe the same windows, so they are keyed by window id and the
+    /// newer observation wins — a fresh status line is not overwritten by an
+    /// older cached number, and a cache refreshed while no session was running
+    /// supersedes a status line from hours ago.
+    private func mergedQuotas() -> [QuotaWindow] {
+        var byID: [String: QuotaWindow] = [:]
+        for window in quotas {
+            byID[window.id] = window
+        }
+        for window in (try? usageCacheReader?.read()) ?? [] {
+            if let existing = byID[window.id], existing.fetchedAt >= window.fetchedAt {
+                continue
+            }
+            byID[window.id] = window
+        }
+        return byID.values.sorted { $0.windowDuration < $1.windowDuration }
     }
 
     public func eventStream() async -> AsyncStream<AgentEvent> {

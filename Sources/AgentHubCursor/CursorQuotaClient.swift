@@ -27,11 +27,38 @@ public struct CursorQuotaClient: Sendable {
         self.now = now
     }
 
+    /// Builds the `WorkosCursorSessionToken` cookie value.
+    ///
+    /// Cursor stores a bare JWT in `cursorAuth/accessToken`, but `cursor.com`
+    /// expects `<sub>::<jwt>`; sending the bare token returns HTTP 401
+    /// `not_authenticated`. The subject is read from the token's own claims, so
+    /// no additional credential is needed. A token that is already prefixed, is
+    /// not a JWT, or carries no subject is used unchanged rather than mangled.
+    static func sessionCookieValue(for token: String) -> String {
+        guard !token.contains("::") else { return token }
+
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return token }
+
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = claims["sub"] as? String,
+              !subject.isEmpty else {
+            return token
+        }
+        return "\(subject)::\(token)"
+    }
+
     public func fetchWindows(token: String) async throws -> [QuotaWindow] {
         var request = URLRequest(url: Self.usageSummaryURL)
         request.httpMethod = "GET"
         request.setValue(
-            "WorkosCursorSessionToken=\(token)",
+            "WorkosCursorSessionToken=\(Self.sessionCookieValue(for: token))",
             forHTTPHeaderField: "Cookie"
         )
 

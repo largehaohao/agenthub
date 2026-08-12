@@ -183,7 +183,9 @@ private func runDaemon(paths: DaemonPaths) async throws {
         registry: openCodeRegistry,
         managedServer: managedOpenCode,
         discovery: openCodeDiscovery,
-        credentialStore: credentialStore
+        credentialStore: credentialStore,
+        // Reads the CLI's own subscription key per request; never persisted.
+        goQuotaClient: OpenCodeGoQuotaClient()
     )
     let claudeAdapter = ClaudeAdapter(
         accountID: "default",
@@ -193,7 +195,9 @@ private func runDaemon(paths: DaemonPaths) async throws {
         ),
         terminal: resolvedClaudeTerminal(),
         hookInstaller: resolvedClaudeHookInstaller(),
-        statusLineInstaller: resolvedClaudeStatusLineInstaller()
+        statusLineInstaller: resolvedClaudeStatusLineInstaller(),
+        // Pollable usage source, so quota refreshes without an active session.
+        usageCacheReader: ClaudeUsageCacheReader.standard()
     )
     let cursorQuotaAuth = CursorQuotaAuthStore()
     let cursorQuotaCollector = CursorQuotaCollector(

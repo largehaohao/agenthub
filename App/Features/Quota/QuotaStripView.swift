@@ -94,8 +94,8 @@ private struct QuotaWindowView: View {
             // An elapsed window's reset time is in the past, so "resets in ..."
             // would read as a countdown that already fired.
             Text(window.hasElapsed
-                 ? "\(Int(window.usedPercent))% used · window ended"
-                 : "\(Int(window.usedPercent))% used · resets \(window.resetsAt, style: .relative)")
+                 ? "\(window.displayPercent) used · window ended"
+                 : "\(window.displayPercent) used · resets \(window.resetsAt, style: .relative)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

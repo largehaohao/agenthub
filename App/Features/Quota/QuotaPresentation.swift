@@ -18,12 +18,18 @@ struct QuotaPresentation: Identifiable, Equatable {
     /// the last reading is retained but must not read as current.
     let hasElapsed: Bool
 
-    init(window: QuotaWindow, now: Date) {
+    init(window: QuotaWindow, now: Date, disambiguateWithLabel: Bool = false) {
         // Providers name the same window differently ("Session", "Weekly",
         // "primary"). The duration is the one description that means the same
-        // thing across providers, so it is the canonical name.
+        // thing across providers, so it is the canonical name. Cursor is the
+        // exception: its Auto/API/Total windows share one billing cycle, so the
+        // duration alone would render three identical titles.
         id = window.id
-        title = window.canonicalLabel
+        if disambiguateWithLabel, let label = window.label {
+            title = "\(window.canonicalLabel) · \(label)"
+        } else {
+            title = window.canonicalLabel
+        }
         accountPlan = [window.accountID, window.plan]
             .compactMap { $0 }
             .joined(separator: " · ")
@@ -38,6 +44,10 @@ struct QuotaPresentation: Identifiable, Equatable {
     /// recommendation. This mirrors `QuotaWindow.availablePace`, which already
     /// returns nil in both cases.
     var informsRecommendations: Bool { !isStale && !hasElapsed }
+
+    /// Whole-number percentage. Cursor reports long fractions such as
+    /// 39.35333333333333, which must not reach the strip verbatim.
+    var displayPercent: String { "\(Int(usedPercent.rounded()))%" }
 
     static func durationLabel(_ duration: TimeInterval) -> String {
         QuotaWindow.durationLabel(duration)
@@ -57,12 +67,30 @@ struct QuotaProviderRow: Identifiable, Equatable {
     static func rows(from quotas: [QuotaWindow], now: Date) -> [QuotaProviderRow] {
         Dictionary(grouping: quotas, by: \.provider)
             .map { provider, windows in
-                QuotaProviderRow(
+                // Only fall back to the provider's own label when the duration
+                // does not identify a window on its own.
+                let durations = windows.map(\.windowDuration)
+                let ambiguous = Set(durations).count != durations.count
+                return QuotaProviderRow(
                     id: provider.rawValue,
                     provider: provider,
                     windows: windows
-                        .sorted { $0.windowDuration < $1.windowDuration }
-                        .map { QuotaPresentation(window: $0, now: now) }
+                        // Ties keep the provider's reported order stable so the
+                        // strip does not reshuffle between refreshes.
+                        .enumerated()
+                        .sorted {
+                            $0.element.windowDuration == $1.element.windowDuration
+                                ? $0.offset < $1.offset
+                                : $0.element.windowDuration < $1.element.windowDuration
+                        }
+                        .map(\.element)
+                        .map {
+                            QuotaPresentation(
+                                window: $0,
+                                now: now,
+                                disambiguateWithLabel: ambiguous
+                            )
+                        }
                 )
             }
             .sorted { $0.provider.rawValue < $1.provider.rawValue }

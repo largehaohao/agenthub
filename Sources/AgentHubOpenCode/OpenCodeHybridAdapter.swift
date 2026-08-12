@@ -17,6 +17,8 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     private let managedServer: any ManagedOpenCodeServing
     private let discovery: any OpenCodeEndpointDiscovering
     private let credentialStore: any CredentialStoring
+    /// Subscription usage for OpenCode Go. Absent when the CLI is not signed in.
+    private let goQuotaClient: OpenCodeGoQuotaClient?
     private let clientFactory: @Sendable (OpenCodeRuntimeEndpoint) -> any OpenCodeAPI
     private let now: @Sendable () -> Date
     private let events: AsyncStream<AgentEvent>
@@ -40,6 +42,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         managedServer: any ManagedOpenCodeServing,
         discovery: any OpenCodeEndpointDiscovering,
         credentialStore: any CredentialStoring,
+        goQuotaClient: OpenCodeGoQuotaClient? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.accountID = accountID
@@ -47,6 +50,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         self.managedServer = managedServer
         self.discovery = discovery
         self.credentialStore = credentialStore
+        self.goQuotaClient = goQuotaClient
         clientFactory = Self.makeHTTPClient
         self.now = now
         let pair = AsyncStream<AgentEvent>.makeStream()
@@ -61,6 +65,8 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         discovery: any OpenCodeEndpointDiscovering,
         credentialStore: any CredentialStoring,
         clientFactory: @escaping @Sendable (OpenCodeRuntimeEndpoint) -> any OpenCodeAPI,
+        // Defaults to nil so unit tests never reach the live usage endpoint.
+        goQuotaClient: OpenCodeGoQuotaClient? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.accountID = accountID
@@ -68,6 +74,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         self.managedServer = managedServer
         self.discovery = discovery
         self.credentialStore = credentialStore
+        self.goQuotaClient = goQuotaClient
         self.clientFactory = clientFactory
         self.now = now
         let pair = AsyncStream<AgentEvent>.makeStream()
@@ -284,7 +291,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             sessions: sessions,
             nodes: nodes,
             requests: requests,
-            quotas: [],
+            quotas: await goQuotaClient?.fetch() ?? [],
             endpoints: endpointsByID.values.map(\.summary).sorted { $0.id < $1.id },
             requestsAreAuthoritative: true
         )
