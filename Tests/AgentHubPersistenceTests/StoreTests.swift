@@ -32,7 +32,7 @@ final class StoreTests: XCTestCase {
             windowDuration: 18_000,
             resetsAt: reset,
             fetchedAt: fetched,
-            source: "codexbar"
+            source: "claude-statusline"
         )
         let sonnet = try QuotaWindow(
             provider: .claude,
@@ -44,7 +44,7 @@ final class StoreTests: XCTestCase {
             windowDuration: 18_000,
             resetsAt: reset,
             fetchedAt: fetched,
-            source: "codexbar"
+            source: "claude-statusline"
         )
 
         try await store.apply(.quotaUpserted(session))

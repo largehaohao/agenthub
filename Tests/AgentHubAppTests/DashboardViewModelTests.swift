@@ -80,14 +80,14 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(model.state.components["claude:hooks"], component)
     }
 
-    func testInstallCodexBarRequiresExplicitViewModelAction() async {
+    func testInstallQuotaReporterRequiresExplicitViewModelAction() async {
         let fixture = DashboardFixture()
         let component = ProviderComponentStatus(
             provider: .claude,
-            component: "codexbar",
+            component: "statusline",
             available: true,
             version: nil,
-            path: "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
+            path: "/tmp/agenthub-claude-statusline",
             message: nil,
             changedAt: Date(timeIntervalSince1970: 1)
         )
@@ -98,17 +98,17 @@ final class DashboardViewModelTests: XCTestCase {
         let model = DashboardViewModel(client: client)
         await model.connect()
 
-        await model.installCodexBar()
+        await model.installQuotaReporter()
 
         let commands = await client.recordedCommands
         XCTAssertTrue(commands.contains {
-            if case .configureProvider(.claude, .installQuotaHelper) = $0 { return true }
+            if case .configureProvider(.claude, .installQuotaReporter) = $0 { return true }
             return false
         })
-        XCTAssertEqual(model.state.components["claude:codexbar"], component)
+        XCTAssertEqual(model.state.components["claude:statusline"], component)
     }
 
-    func testRefreshClaudeQuotaUsesTheQuotaAction() async {
+    func testUninstallQuotaReporterUsesItsOwnAction() async {
         let fixture = DashboardFixture()
         let client = FakeDaemonClient(
             snapshot: fixture.state,
@@ -117,11 +117,11 @@ final class DashboardViewModelTests: XCTestCase {
         let model = DashboardViewModel(client: client)
         await model.connect()
 
-        await model.refreshClaudeQuota()
+        await model.uninstallQuotaReporter()
 
         let commands = await client.recordedCommands
         XCTAssertTrue(commands.contains {
-            if case .configureProvider(.claude, .refreshQuota) = $0 { return true }
+            if case .configureProvider(.claude, .uninstallQuotaReporter) = $0 { return true }
             return false
         })
     }
@@ -138,7 +138,7 @@ final class DashboardViewModelTests: XCTestCase {
             windowDuration: 604_800,
             resetsAt: Date(timeIntervalSince1970: 600_000),
             fetchedAt: Date(timeIntervalSince1970: 1_000),
-            source: "codexbar"
+            source: "claude-statusline"
         )
 
         let item = QuotaPresentation(window: window, now: now)

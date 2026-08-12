@@ -239,14 +239,15 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    /// Installs CodexBar. This only ever runs from an explicit user action;
-    /// AgentHub never installs a package on its own.
-    func installCodexBar() async {
-        await configure(provider: .claude, action: .installQuotaHelper)
+    /// Installs AgentHub's usage reporter into the Claude status line. This
+    /// only ever runs from an explicit user action, and it wraps rather than
+    /// replaces any status line the user already has.
+    func installQuotaReporter() async {
+        await configure(provider: .claude, action: .installQuotaReporter)
     }
 
-    func refreshClaudeQuota() async {
-        await configure(provider: .claude, action: .refreshQuota)
+    func uninstallQuotaReporter() async {
+        await configure(provider: .claude, action: .uninstallQuotaReporter)
     }
 
     func send(_ text: String, to sessionID: UUID) async {

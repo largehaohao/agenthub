@@ -54,11 +54,11 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     private let accountID: String
     private let classifier: ClaudeProcessClassifier
     private let decoder = ClaudeHookDecoder()
+    private let statusLineDecoder: ClaudeStatusLineDecoder
     private let transcripts: (any ClaudeTranscriptReading)?
     private let terminal: (any ClaudeTerminalControlling)?
     private let hookInstaller: ClaudeHookInstaller?
-    private let quotaCollector: (any ClaudeQuotaCollecting)?
-    private let quotaInstaller: CodexBarInstaller?
+    private let statusLineInstaller: ClaudeStatusLineInstaller?
     private let executor = ClaudeManagedRequestExecutor()
     private let makeSessionID: @Sendable () -> UUID
     private let launchTimeout: Duration
@@ -76,7 +76,6 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     /// refresh so the desktop can show them marked stale instead of blank.
     private var quotas: [QuotaWindow] = []
     private var components: [String: ProviderComponentStatus] = [:]
-    private var quotaRefreshTask: Task<Void, Never>?
 
     public init(
         accountID: String,
@@ -84,19 +83,18 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         transcripts: (any ClaudeTranscriptReading)? = nil,
         terminal: (any ClaudeTerminalControlling)? = nil,
         hookInstaller: ClaudeHookInstaller? = nil,
-        quotaCollector: (any ClaudeQuotaCollecting)? = nil,
-        quotaInstaller: CodexBarInstaller? = nil,
+        statusLineInstaller: ClaudeStatusLineInstaller? = nil,
         makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
         launchTimeout: Duration = .seconds(30),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.accountID = accountID
+        self.statusLineDecoder = ClaudeStatusLineDecoder(accountID: accountID)
         self.classifier = classifier
         self.transcripts = transcripts
         self.terminal = terminal
         self.hookInstaller = hookInstaller
-        self.quotaCollector = quotaCollector
-        self.quotaInstaller = quotaInstaller
+        self.statusLineInstaller = statusLineInstaller
         self.makeSessionID = makeSessionID
         self.launchTimeout = launchTimeout
         self.now = now
@@ -107,6 +105,21 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     public func ingest(_ envelope: ProviderHookEnvelope) async throws {
         guard envelope.provider == .claude else {
             throw ClaudeAdapterError.unsupportedCapability
+        }
+
+        // A status-line payload arrives through the same transport but carries
+        // no `hook_event_name`; it reports usage rather than a lifecycle change.
+        if ClaudeStatusLineDecoder.looksLikeStatusLine(envelope.rawJSON) {
+            let report = try statusLineDecoder.decode(envelope.rawJSON)
+            // An empty report means Claude sent no limits this time; the last
+            // real reading is kept rather than blanked.
+            if !report.windows.isEmpty {
+                quotas = report.windows
+                for window in report.windows {
+                    emit(.quotaUpserted(window))
+                }
+            }
+            return
         }
 
         let event = try decoder.decode(envelope.rawJSON)
@@ -223,11 +236,18 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         // Quota setup is deliberately separate from hook setup: a missing or
         // broken quota source must never block Claude session support.
         switch action {
-        case .installQuotaHelper:
-            try await installQuotaHelper()
-            return [try await refreshQuotaStatus()]
-        case .refreshQuota:
-            return [try await refreshQuotaStatus()]
+        case .installQuotaReporter:
+            guard let statusLineInstaller else {
+                throw ClaudeAdapterError.unsupportedCapability
+            }
+            try statusLineInstaller.install()
+            return [refreshStatusLineComponent()]
+        case .uninstallQuotaReporter:
+            guard let statusLineInstaller else {
+                throw ClaudeAdapterError.unsupportedCapability
+            }
+            try statusLineInstaller.uninstall()
+            return [refreshStatusLineComponent()]
         case .installHooks, .uninstallHooks, .refreshComponents:
             break
         }
@@ -253,7 +273,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             try hookInstaller.install()
         case .uninstallHooks:
             try hookInstaller.uninstall()
-        case .refreshComponents, .installQuotaHelper, .refreshQuota:
+        case .refreshComponents, .installQuotaReporter, .uninstallQuotaReporter:
             break
         }
 
@@ -265,116 +285,34 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
 
     // MARK: - Quota
 
-    /// Reads the quota source once. A source failure updates only the
-    /// `codexbar` component; it never throws into session handling and never
-    /// discards the windows already known.
-    public func refreshQuota() async throws {
-        _ = try await refreshQuotaStatus()
-    }
-
+    /// Quota comes from Claude Code's own status line, which pushes real
+    /// `rate_limits` percentages into `ingest`. There is nothing to poll, so
+    /// no refresh loop, backoff, or third-party helper is involved.
     public func componentStatus(named component: String) async -> ProviderComponentStatus? {
         components[component]
     }
 
-    /// Starts the periodic refresh loop. Cancelled on shutdown so a stopped
-    /// adapter leaves no timer behind.
-    public func startQuotaRefresh() async {
-        guard quotaCollector != nil, quotaRefreshTask == nil else { return }
-
-        quotaRefreshTask = Task { [weak self] in
-            var schedule = ClaudeQuotaRefreshSchedule()
-            while !Task.isCancelled {
-                let failed = await self?.refreshQuotaReportingFailure() ?? true
-                let delay = schedule.nextDelay(afterFailure: failed)
-                try? await Task.sleep(for: .seconds(delay))
-            }
-        }
-    }
-
-    public func stopQuotaRefresh() async {
-        quotaRefreshTask?.cancel()
-        quotaRefreshTask = nil
-    }
-
-    private func refreshQuotaReportingFailure() async -> Bool {
-        guard let status = try? await refreshQuotaStatus() else { return true }
-        return !status.available
-    }
-
+    /// Reports whether the usage reporter is installed. Absence is a visible
+    /// unavailable component, never an error: sessions work either way.
     @discardableResult
-    private func refreshQuotaStatus() async throws -> ProviderComponentStatus {
-        guard let quotaCollector else {
-            return recordQuotaComponent(
+    private func refreshStatusLineComponent() -> ProviderComponentStatus {
+        let status: ProviderComponentStatus
+        if let statusLineInstaller, let observed = try? statusLineInstaller.status() {
+            status = observed
+        } else {
+            status = ProviderComponentStatus(
+                provider: .claude,
+                component: "statusline",
                 available: false,
+                version: nil,
                 path: nil,
-                message: "CodexBar is not installed, so Claude usage is unavailable."
+                message: "Install the usage reporter to see Claude limits.",
+                changedAt: now()
             )
         }
-
-        do {
-            let snapshot = try await quotaCollector.collect()
-            quotas = snapshot.windows
-            for window in snapshot.windows {
-                emit(.quotaUpserted(window))
-            }
-            return recordQuotaComponent(
-                available: true,
-                path: snapshot.executablePath,
-                message: snapshot.isPartial
-                    ? "Some Claude usage windows were unavailable."
-                    : nil
-            )
-        } catch {
-            // Only a coarse category is surfaced; the last known windows stay
-            // in place so their standard staleness rules can apply.
-            return recordQuotaComponent(
-                available: false,
-                path: nil,
-                message: Self.message(for: error as? ClaudeQuotaError ?? .sourceFailed)
-            )
-        }
-    }
-
-    private func installQuotaHelper() async throws {
-        guard let quotaInstaller else {
-            throw ClaudeAdapterError.unsupportedCapability
-        }
-        try await quotaInstaller.install()
-    }
-
-    @discardableResult
-    private func recordQuotaComponent(
-        available: Bool,
-        path: String?,
-        message: String?
-    ) -> ProviderComponentStatus {
-        let status = ProviderComponentStatus(
-            provider: .claude,
-            component: "codexbar",
-            available: available,
-            version: nil,
-            path: path,
-            message: message,
-            changedAt: now()
-        )
         components[status.component] = status
         emit(.componentUpserted(status))
         return status
-    }
-
-    private static func message(for error: ClaudeQuotaError) -> String {
-        switch error {
-        case .sourceUnavailable:
-            "CodexBar is not installed, so Claude usage is unavailable."
-        case .timeout:
-            "CodexBar did not respond in time."
-        case .authenticationRequired:
-            "CodexBar needs you to sign in to Claude again."
-        case .malformedSnapshot:
-            "CodexBar returned usage data AgentHub could not read."
-        case .sourceFailed:
-            "CodexBar could not report Claude usage."
-        }
     }
 
     // MARK: - AgentAdapter

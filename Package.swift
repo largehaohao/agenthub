@@ -16,6 +16,10 @@ let package = Package(
         .library(name: "AgentHubTestSupport", targets: ["AgentHubTestSupport"]),
         .executable(name: "agenthubd", targets: ["agenthubd"]),
         .executable(name: "agenthub-claude-hook", targets: ["agenthub-claude-hook"]),
+        .executable(
+            name: "agenthub-claude-statusline",
+            targets: ["agenthub-claude-statusline"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "7.10.0"),
@@ -106,6 +110,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "agenthub-claude-hook",
+            dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubIPC"]
+        ),
+        .executableTarget(
+            name: "agenthub-claude-statusline",
             dependencies: ["AgentHubClaude", "AgentHubCore", "AgentHubIPC"]
         ),
         .testTarget(

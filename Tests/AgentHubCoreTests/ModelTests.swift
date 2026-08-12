@@ -119,7 +119,7 @@ final class ModelTests: XCTestCase {
             windowDuration: 18_000,
             resetsAt: reset,
             fetchedAt: now,
-            source: "codexbar"
+            source: "claude-statusline"
         )
         let sonnet = try QuotaWindow(
             provider: .claude,
@@ -131,7 +131,7 @@ final class ModelTests: XCTestCase {
             windowDuration: 18_000,
             resetsAt: reset,
             fetchedAt: now,
-            source: "codexbar"
+            source: "claude-statusline"
         )
 
         XCTAssertNotEqual(overall.id, sonnet.id)
@@ -191,7 +191,7 @@ final class ModelTests: XCTestCase {
             windowDuration: 604_800,
             resetsAt: Date(timeIntervalSince1970: 5_000),
             fetchedAt: Date(timeIntervalSince1970: 1_000),
-            source: "codexbar"
+            source: "claude-statusline"
         )
 
         let data = try JSONEncoder.agentHub.encode(window)

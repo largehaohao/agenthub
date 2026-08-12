@@ -1,0 +1,23 @@
+{
+  "session_id": "abc123",
+  "cwd": "/Users/example/repo",
+  "model": { "id": "claude-opus-5", "display_name": "Opus 5" },
+  "workspace": { "current_dir": "/Users/example/repo", "project_dir": "/Users/example/repo" },
+  "version": "2.1.228",
+  "context_window": {
+    "total_input_tokens": 42000,
+    "context_window_size": 200000,
+    "used_percentage": 21,
+    "remaining_percentage": 79
+  },
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 42.5,
+      "resets_at": "2026-08-12T09:00:00Z"
+    },
+    "seven_day": {
+      "used_percentage": 12,
+      "resets_at": "2026-08-17T00:00:00Z"
+    }
+  }
+}

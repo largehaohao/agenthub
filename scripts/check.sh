@@ -18,10 +18,12 @@ xcodebuild \
 HELPERS_DIR=.build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/Helpers
 HELPER_PATH="$HELPERS_DIR/agenthubd"
 CLAUDE_HOOK_PATH="$HELPERS_DIR/agenthub-claude-hook"
+CLAUDE_STATUSLINE_PATH="$HELPERS_DIR/agenthub-claude-statusline"
 
-# Both helpers ship together: without the hook bridge, Claude sessions started
-# outside AgentHub are never observed.
-for helper in "$HELPER_PATH" "$CLAUDE_HOOK_PATH"; do
+# All helpers ship together: without the hook bridge, Claude sessions started
+# outside AgentHub are never observed, and without the status-line reporter no
+# usage can be collected.
+for helper in "$HELPER_PATH" "$CLAUDE_HOOK_PATH" "$CLAUDE_STATUSLINE_PATH"; do
   if [[ ! -x "$helper" ]]; then
     print -u2 -- "missing embedded helper: $helper"
     exit 1
@@ -61,16 +63,17 @@ if rg -n -- '--dangerously-skip-permissions|bypassPermissions' Sources App >/dev
   exit 1
 fi
 
-# Installing software is only ever an explicit user action, so the Homebrew
-# invocation must exist in exactly one reviewable place.
-if rg -n -- 'install", "--cask|install --cask' Sources App \
-  | rg -v '^Sources/AgentHubClaude/CodexBarInstaller\.swift:' >/dev/null; then
-  print -u2 -- "Package installation must only be built in CodexBarInstaller"
+# Usage is collected from Claude itself; AgentHub must never install software
+# or shell out to a package manager to obtain it.
+if rg -n -- 'brew |--cask|sudo ' Sources App >/dev/null; then
+  print -u2 -- "AgentHub must never invoke a package manager or sudo"
   exit 1
 fi
 
-# A quota source is never trusted enough to run through a shell.
-if rg -n 'sudo|/bin/sh|/bin/bash' Sources/AgentHubClaude >/dev/null; then
-  print -u2 -- "Claude quota commands must never use a shell or sudo"
+# The status line belongs to the user. Only the installer may write that key,
+# so a stray writer cannot silently replace their own status line.
+if rg -n '"statusLine"' Sources App \
+  | rg -v '^Sources/AgentHubClaude/ClaudeStatusLineInstaller\.swift:' >/dev/null; then
+  print -u2 -- "Only ClaudeStatusLineInstaller may write the statusLine key"
   exit 1
 fi

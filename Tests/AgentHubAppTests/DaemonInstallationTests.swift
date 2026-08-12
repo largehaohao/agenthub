@@ -77,6 +77,17 @@ final class DaemonInstallationTests: XCTestCase {
         XCTAssertFalse(arguments.contains { $0.contains("agenthub-claude-hook") })
     }
 
+    func testStatusLineHelperInstallsBesideTheDaemon() {
+        let paths = DaemonInstallation.paths(
+            home: URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        )
+
+        XCTAssertEqual(
+            paths.claudeStatusLineExecutable.path,
+            "/Users/tester/Library/Application Support/AgentHub/bin/agenthub-claude-statusline"
+        )
+    }
+
     func testInstallStagesBothHelpersAsExecutable() throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -86,15 +97,23 @@ final class DaemonInstallationTests: XCTestCase {
         let hook = try makeFakeExecutable(
             at: bundled.appendingPathComponent("agenthub-claude-hook")
         )
+        let statusLine = try makeFakeExecutable(
+            at: bundled.appendingPathComponent("agenthub-claude-statusline")
+        )
 
         try DaemonInstallation.stageHelpers(
             daemon: daemon,
             claudeHook: hook,
+            claudeStatusLine: statusLine,
             home: home
         )
 
         let paths = DaemonInstallation.paths(home: home)
-        for helper in [paths.executable, paths.claudeHookExecutable] {
+        for helper in [
+            paths.executable,
+            paths.claudeHookExecutable,
+            paths.claudeStatusLineExecutable,
+        ] {
             XCTAssertTrue(
                 FileManager.default.isExecutableFile(atPath: helper.path),
                 "expected \(helper.lastPathComponent) to be executable"
@@ -111,11 +130,15 @@ final class DaemonInstallationTests: XCTestCase {
         try FileManager.default.createDirectory(at: bundled, withIntermediateDirectories: true)
         let daemon = try makeFakeExecutable(at: bundled.appendingPathComponent("agenthubd"))
         let missing = bundled.appendingPathComponent("agenthub-claude-hook")
+        let statusLine = try makeFakeExecutable(
+            at: bundled.appendingPathComponent("agenthub-claude-statusline")
+        )
 
         XCTAssertThrowsError(
             try DaemonInstallation.stageHelpers(
                 daemon: daemon,
                 claudeHook: missing,
+                claudeStatusLine: statusLine,
                 home: home
             )
         )

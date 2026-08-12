@@ -83,32 +83,40 @@ is not available; use the Claude window AgentHub brings forward.
 
 ## Claude subscription usage
 
-Usage comes from CodexBar's machine-readable CLI, discovered first at
-`/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI` and then on `PATH`.
-AgentHub runs exactly:
+Usage comes from Claude Code itself. Claude Code pipes a JSON payload to the
+configured `statusLine` command, and that payload carries the real limits:
 
 ```
-codexbar usage --provider claude --source auto --format json --json-only --timeout 10
+rate_limits: {
+  five_hour: { used_percentage, resets_at },
+  seven_day: { used_percentage, resets_at }
+}
 ```
 
-Only JSON is consumed — the human-readable cards and progress bars are never
-parsed, so a cosmetic CodexBar change cannot corrupt AgentHub's data.
+Nothing is estimated from token counts, and no third-party app is involved.
 
-Installation happens only from **Install CodexBar** in Claude Settings, which
-runs `brew install --cask codexbar` with an exact argument array and no shell.
-Homebrew is accepted only from `/opt/homebrew/bin/brew` or `/usr/local/bin/brew`,
-and `sudo` is never used.
+Claude Code supports only one status line, so **Install Usage Reporter** wraps
+rather than replaces. AgentHub's reporter is fed the payload first, writes
+nothing to stdout, and then the user's own command receives the identical bytes
+and still owns the display. A reporter failure is swallowed so the status line
+keeps working. Removing restores the original command byte-for-byte, or removes
+the key entirely when AgentHub introduced it. A status line AgentHub does not
+own is never modified.
 
-The refresh loop polls every 5 minutes and backs off 1, 2, 4, 8, then 15 minutes
-after failures, resetting after one valid snapshot. A failure updates only the
-`codexbar` component: sessions, requests, jumps, and handoffs are unaffected,
-and the last known windows are kept so they can be shown as stale rather than
-disappearing.
+The reporter lives at:
 
-Source errors are reported only as coarse categories (unavailable, timeout,
-authentication required, malformed, failed). CodexBar's stderr text, account
-identifiers, and tokens are never stored or displayed. Authentication is
-repaired in CodexBar itself, in a foreground flow the user initiates.
+```
+~/Library/Application Support/AgentHub/bin/agenthub-claude-statusline
+```
 
-Default tests use fixtures and fake runners; they never invoke CodexBar, reach
-the network, or consume quota.
+Only `rate_limits` is read. The prompt, transcript path, and context-window
+detail in the payload are never stored. A window is emitted only when both its
+percentage and reset time are valid: absent data stays absent rather than
+displaying a fabricated 0%.
+
+Known limits: the status line fires only while a Claude Code session is active,
+so usage refreshes when you use Claude rather than on a timer, and Claude
+Desktop is not covered.
+
+Default tests use fixtures only and never invoke Claude or write a real status
+line.

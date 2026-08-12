@@ -39,7 +39,7 @@ targets:
           else
             SWIFT_CONFIGURATION="debug"
           fi
-          for PRODUCT in agenthubd agenthub-claude-hook; do
+          for PRODUCT in agenthubd agenthub-claude-hook agenthub-claude-statusline; do
             xcrun swift build \
               --package-path "$SRCROOT" \
               --product "$PRODUCT" \
@@ -47,7 +47,7 @@ targets:
           done
           HELPER_DIR="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers"
           mkdir -p "$HELPER_DIR"
-          for PRODUCT in agenthubd agenthub-claude-hook; do
+          for PRODUCT in agenthubd agenthub-claude-hook agenthub-claude-statusline; do
             install -m 700 \
               "$SRCROOT/.build/$SWIFT_CONFIGURATION/$PRODUCT" \
               "$HELPER_DIR/$PRODUCT"
@@ -55,6 +55,7 @@ targets:
         outputFiles:
           - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthubd
           - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-claude-hook
+          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-claude-statusline
         basedOnDependencyAnalysis: false
   AgentHubAppTests:
     type: bundle.unit-test

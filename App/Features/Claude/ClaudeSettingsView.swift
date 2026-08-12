@@ -18,11 +18,11 @@ struct ClaudeSettingsView: View {
         ("tmux", "tmux", "Backs managed Claude sessions so they survive window closes."),
         ("iterm", "iTerm", "Shows managed Claude sessions as a normal terminal."),
         ("accessibility", "Accessibility", "Optional. Enables exact Claude Desktop navigation."),
-        ("codexbar", "CodexBar", "Optional. Reports Claude subscription usage."),
+        ("statusline", "Usage reporter", "Optional. Reports Claude usage limits."),
     ]
 
-    private var codexBarInstalled: Bool {
-        components.first { $0.component == "codexbar" }?.available == true
+    private var quotaReporterInstalled: Bool {
+        components.first { $0.component == "statusline" }?.available == true
     }
 
     var body: some View {
@@ -46,20 +46,18 @@ struct ClaudeSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("Usage") {
-                    // Install is offered only while CodexBar is missing, and it
-                    // runs Homebrew only because the user asked for it here.
-                    if codexBarInstalled {
-                        Button("Refresh Claude Usage") {
-                            Task { await onConfigure(.refreshQuota) }
+                    if quotaReporterInstalled {
+                        Button("Remove Usage Reporter") {
+                            Task { await onConfigure(.uninstallQuotaReporter) }
                         }
                     } else {
-                        Button("Install CodexBar") {
-                            Task { await onConfigure(.installQuotaHelper) }
+                        Button("Install Usage Reporter") {
+                            Task { await onConfigure(.installQuotaReporter) }
                         }
                     }
-                    Text("Claude usage comes from CodexBar, a separate app installed with "
-                         + "Homebrew. AgentHub never installs it on its own, and Claude "
-                         + "sessions keep working without it.")
+                    Text("Usage comes from Claude Code itself, through its status line. "
+                         + "Installing keeps any status line you already have and adds "
+                         + "AgentHub alongside it; removing restores it exactly.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

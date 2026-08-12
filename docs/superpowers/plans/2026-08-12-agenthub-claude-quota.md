@@ -1,5 +1,15 @@
 # AgentHub Claude Quota Implementation Plan
 
+> **SUPERSEDED 2026-08-12.** This plan specified CodexBar as the quota source.
+> The user chose to collect usage directly instead, so CodexBar was removed and
+> replaced by a status-line reporter: Claude Code pipes `rate_limits`
+> (`five_hour` / `seven_day`, each with `used_percentage` and `resets_at`) to its
+> configured `statusLine` command, which is real reported usage rather than an
+> estimate. Tasks 1 and 4 landed largely as written; Tasks 2 and 3 were replaced
+> by `ClaudeStatusLineQuota`, `ClaudeStatusLineInstaller`, and the
+> `agenthub-claude-statusline` helper. Retained for history — see
+> `docs/claude-testing.md` for the implemented behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Install and integrate CodexBar as an explicit Claude subscription-usage source, showing fresh windows and excluding stale data from recommendations without affecting Claude session control.

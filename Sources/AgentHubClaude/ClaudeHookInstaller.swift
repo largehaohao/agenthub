@@ -40,6 +40,7 @@ public struct ClaudeHookInstaller: Sendable {
     static let hookTimeoutSeconds = 5
 
     private let settingsURL: URL
+    private let store: ClaudeSettingsStore
     private let executableURL: URL
     private let now: @Sendable () -> Date
 
@@ -49,6 +50,7 @@ public struct ClaudeHookInstaller: Sendable {
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.settingsURL = settingsURL
+        self.store = ClaudeSettingsStore(settingsURL: settingsURL)
         self.executableURL = executableURL
         self.now = now
     }
@@ -61,7 +63,7 @@ public struct ClaudeHookInstaller: Sendable {
     }
 
     public func status() throws -> ProviderComponentStatus {
-        let settings = (try? loadSettings()) ?? [:]
+        let settings = (try? store.load()) ?? [:]
         let installed = Self.observedEvents.allSatisfy { event in
             !ownedEntries(in: settings, event: event).isEmpty
         }
@@ -78,7 +80,7 @@ public struct ClaudeHookInstaller: Sendable {
     }
 
     public func install() throws {
-        var settings = try loadSettings()
+        var settings = try store.load()
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
 
         for event in Self.observedEvents {
@@ -102,13 +104,13 @@ public struct ClaudeHookInstaller: Sendable {
         }
 
         settings["hooks"] = hooks
-        try writeAtomically(settings)
+        try store.write(settings)
     }
 
     public func uninstall() throws {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else { return }
 
-        var settings = try loadSettings()
+        var settings = try store.load()
         guard var hooks = settings["hooks"] as? [String: Any] else { return }
 
         for (event, value) in hooks {
@@ -137,7 +139,7 @@ public struct ClaudeHookInstaller: Sendable {
         } else {
             settings["hooks"] = hooks
         }
-        try writeAtomically(settings)
+        try store.write(settings)
     }
 
     private func hookEntry() -> [String: Any] {
@@ -167,59 +169,5 @@ public struct ClaudeHookInstaller: Sendable {
         return matchers
             .flatMap { ($0["hooks"] as? [[String: Any]]) ?? [] }
             .filter(isOwned)
-    }
-
-    private func loadSettings() throws -> [String: Any] {
-        guard let data = try? Data(contentsOf: settingsURL), !data.isEmpty else { return [:] }
-        guard let object = try? JSONSerialization.jsonObject(with: data),
-              let settings = object as? [String: Any] else {
-            throw ClaudeHookInstallerError.malformedSettings
-        }
-        return settings
-    }
-
-    /// Writes through a sibling staged file so an interrupted write can never
-    /// leave the user with truncated Claude settings.
-    private func writeAtomically(_ settings: [String: Any]) throws {
-        let data: Data
-        do {
-            data = try JSONSerialization.data(
-                withJSONObject: settings,
-                options: [.prettyPrinted, .sortedKeys]
-            )
-        } catch {
-            throw ClaudeHookInstallerError.malformedSettings
-        }
-
-        let directory = settingsURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-
-        let staged = directory.appendingPathComponent(
-            ".\(settingsURL.lastPathComponent).agenthub-\(UUID().uuidString)"
-        )
-        do {
-            try data.write(to: staged, options: .atomic)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: staged.path
-            )
-
-            if FileManager.default.fileExists(atPath: settingsURL.path) {
-                _ = try FileManager.default.replaceItemAt(settingsURL, withItemAt: staged)
-            } else {
-                try FileManager.default.moveItem(at: staged, to: settingsURL)
-            }
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: settingsURL.path
-            )
-        } catch {
-            try? FileManager.default.removeItem(at: staged)
-            throw ClaudeHookInstallerError.settingsNotWritable
-        }
     }
 }

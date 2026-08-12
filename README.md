@@ -22,15 +22,16 @@ The current desktop slice supports Codex, OpenCode, and Claude end to end:
   arguments;
 - surface Claude permissions, questions, subagents, and background tasks, and
   answer them only after revalidating the exact live prompt;
-- show Claude subscription usage from CodexBar, an optional separate app.
+- show Claude subscription usage collected from Claude Code itself.
 
-Claude usage windows come from [CodexBar](https://github.com/steipete/codexbar),
-which AgentHub reads through its JSON CLI. It is installed only when you press
-**Install CodexBar** in Claude Settings, which runs
-`brew install --cask codexbar`; AgentHub never installs software on its own.
-Without CodexBar, Claude sessions, requests, jumps, and handoffs all work
-normally and only the usage strip is unavailable. Usage older than 15 minutes
-stays visible but is marked stale and is excluded from pacing recommendations.
+Claude usage comes from Claude Code's own status line, which reports real
+five-hour and weekly limits. Press **Install Usage Reporter** in Claude Settings
+to add AgentHub's reporter; it wraps any status line you already have rather
+than replacing it, and removing it restores yours exactly. No third-party app or
+package installation is involved. Without the reporter, Claude sessions,
+requests, jumps, and handoffs all work normally and only the usage strip is
+empty. Usage older than 15 minutes stays visible but is marked stale and is
+excluded from pacing recommendations.
 
 A Cursor provider slice is planned. OpenCode Go does not expose a supported
 quota source yet, so AgentHub displays that limitation explicitly instead of

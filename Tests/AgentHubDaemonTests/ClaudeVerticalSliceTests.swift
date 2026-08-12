@@ -64,27 +64,27 @@ final class ClaudeVerticalSliceTests: XCTestCase {
         XCTAssertEqual(snapshot.components[status.id], status)
     }
 
-    func testQuotaHelperSetupIsRoutedAsItsOwnAction() async throws {
+    func testQuotaReporterSetupIsRoutedAsItsOwnAction() async throws {
         let context = try await makeContext(start: true)
         let status = ProviderComponentStatus(
             provider: .claude,
-            component: "codexbar",
+            component: "statusline",
             available: false,
             version: nil,
             path: nil,
-            message: "CodexBar is not installed, so Claude usage is unavailable.",
+            message: "Install the usage reporter to see Claude limits.",
             changedAt: Date(timeIntervalSince1970: 1)
         )
         await context.adapter.setComponents([status])
 
-        let reply = await context.api.handle(.configureProvider(.claude, .installQuotaHelper))
+        let reply = await context.api.handle(.configureProvider(.claude, .installQuotaReporter))
 
         guard case .components(let components) = reply else {
             return XCTFail("expected component status")
         }
         XCTAssertEqual(components, [status])
         let actions = await context.adapter.configureActions()
-        XCTAssertEqual(actions, [.installQuotaHelper])
+        XCTAssertEqual(actions, [.installQuotaReporter])
     }
 
     func testUnavailableQuotaSourceLeavesSessionsAndRequestsUntouched() async throws {
@@ -97,20 +97,20 @@ final class ClaudeVerticalSliceTests: XCTestCase {
         await context.adapter.setComponents([
             ProviderComponentStatus(
                 provider: .claude,
-                component: "codexbar",
+                component: "statusline",
                 available: false,
                 version: nil,
                 path: nil,
-                message: "CodexBar could not report Claude usage.",
+                message: "Install the usage reporter to see Claude limits.",
                 changedAt: Date(timeIntervalSince1970: 2)
             ),
         ])
-        _ = await context.api.handle(.configureProvider(.claude, .refreshQuota))
+        _ = await context.api.handle(.configureProvider(.claude, .uninstallQuotaReporter))
 
         let after = try await context.store.snapshot()
         XCTAssertEqual(after.sessions, before.sessions)
         XCTAssertEqual(after.requests, before.requests)
-        XCTAssertFalse(after.components["claude:codexbar"]?.available ?? true)
+        XCTAssertFalse(after.components["claude:statusline"]?.available ?? true)
     }
 
     func testNativeRequestRemainsPendingUntilAppStartsMatchingPlan() async throws {

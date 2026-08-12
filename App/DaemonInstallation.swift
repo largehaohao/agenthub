@@ -7,6 +7,7 @@ struct DaemonInstallationPaths: Equatable {
     /// Claude invokes this helper directly by absolute path, so it is installed
     /// beside the daemon and never referenced from the LaunchAgent plist.
     let claudeHookExecutable: URL
+    let claudeStatusLineExecutable: URL
     let plist: URL
     let standardOutput: URL
     let standardError: URL
@@ -33,6 +34,8 @@ enum DaemonInstallation {
             supportDirectory: support,
             executable: support.appendingPathComponent("bin/agenthubd"),
             claudeHookExecutable: support.appendingPathComponent("bin/agenthub-claude-hook"),
+            claudeStatusLineExecutable: support
+                .appendingPathComponent("bin/agenthub-claude-statusline"),
             plist: home.appendingPathComponent("Library/LaunchAgents/\(label).plist"),
             standardOutput: logs.appendingPathComponent("agenthubd.log"),
             standardError: logs.appendingPathComponent("agenthubd.error.log")
@@ -76,6 +79,7 @@ enum DaemonInstallation {
     static func install(
         helper: URL,
         claudeHook: URL? = nil,
+        claudeStatusLine: URL? = nil,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         pathEnvironment: String = ProcessInfo.processInfo.environment["PATH"]
             ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -84,11 +88,15 @@ enum DaemonInstallation {
         let hook = claudeHook
             ?? helper.deletingLastPathComponent()
                 .appendingPathComponent("agenthub-claude-hook")
+        let statusLine = claudeStatusLine
+            ?? helper.deletingLastPathComponent()
+                .appendingPathComponent("agenthub-claude-statusline")
         let paths = paths(home: home)
 
         try stageHelpers(
             daemon: helper,
             claudeHook: hook,
+            claudeStatusLine: statusLine,
             home: home,
             fileManager: fileManager
         )
@@ -130,10 +138,11 @@ enum DaemonInstallation {
     static func stageHelpers(
         daemon: URL,
         claudeHook: URL,
+        claudeStatusLine: URL,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         fileManager: FileManager = .default
     ) throws {
-        for helper in [daemon, claudeHook] {
+        for helper in [daemon, claudeHook, claudeStatusLine] {
             guard fileManager.isExecutableFile(atPath: helper.path) else {
                 throw DaemonInstallationError.helperMissing
             }
@@ -156,6 +165,12 @@ enum DaemonInstallation {
         try stageCopy(
             from: claudeHook,
             to: paths.claudeHookExecutable,
+            mode: 0o700,
+            fileManager: fileManager
+        )
+        try stageCopy(
+            from: claudeStatusLine,
+            to: paths.claudeStatusLineExecutable,
             mode: 0o700,
             fileManager: fileManager
         )

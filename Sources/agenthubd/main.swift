@@ -76,6 +76,22 @@ private func resolvedClaudeHookInstaller() -> ClaudeHookInstaller? {
     )
 }
 
+/// Points the status-line installer at the user's Claude settings and the
+/// packaged reporter. Returns nil when the reporter is absent so setup reports
+/// honestly rather than writing a status line that cannot run.
+private func resolvedClaudeStatusLineInstaller() -> ClaudeStatusLineInstaller? {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let reporter = home.appendingPathComponent(
+        "Library/Application Support/AgentHub/bin/agenthub-claude-statusline"
+    )
+    guard FileManager.default.isExecutableFile(atPath: reporter.path) else { return nil }
+
+    return ClaudeStatusLineInstaller(
+        settingsURL: home.appendingPathComponent(".claude/settings.json"),
+        executableURL: reporter
+    )
+}
+
 /// Executes a command directly with an argument array; no shell is involved.
 @Sendable
 private func runClaudeCommand(_ command: ClaudeCommand) async throws -> ClaudeCommandResult {
@@ -102,52 +118,6 @@ private func runClaudeCommand(_ command: ClaudeCommand) async throws -> ClaudeCo
         standardOutput: String(decoding: data, as: UTF8.self),
         exitStatus: process.terminationStatus
     )
-}
-
-/// Runs a quota-source command, capturing stdout and stderr separately and
-/// terminating the child if it overruns. No shell is involved.
-@Sendable
-private func runQuotaCommand(_ command: ClaudeCommand) async throws -> QuotaCommandResult {
-    let process = Process()
-    let output = Pipe()
-    let errorOutput = Pipe()
-    process.executableURL = URL(fileURLWithPath: command.executable)
-    process.arguments = command.arguments
-    process.standardOutput = output
-    process.standardError = errorOutput
-    try process.run()
-
-    // The child gets a hard ceiling above CodexBar's own --timeout so a hung
-    // process can never stall the refresh loop.
-    let watchdog = Task {
-        try? await Task.sleep(for: .seconds(15))
-        if process.isRunning { process.terminate() }
-    }
-    defer { watchdog.cancel() }
-
-    let outputData = output.fileHandleForReading.readDataToEndOfFile()
-    let errorData = errorOutput.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-
-    if watchdog.isCancelled == false, process.terminationReason == .uncaughtSignal {
-        throw ClaudeQuotaError.timeout
-    }
-
-    return QuotaCommandResult(
-        standardOutput: String(decoding: outputData, as: UTF8.self),
-        standardError: String(decoding: errorData, as: UTF8.self),
-        exitStatus: process.terminationStatus
-    )
-}
-
-/// Confirms a freshly installed CodexBar can actually produce Claude JSON.
-@Sendable
-private func validateCodexBar() async throws {
-    let collector = CodexBarClaudeQuotaCollector(
-        location: CodexBarLocation.discover(),
-        run: runQuotaCommand
-    )
-    _ = try await collector.collect()
 }
 
 private func prepareDirectory(_ url: URL, fileManager: FileManager = .default) throws {
@@ -209,15 +179,7 @@ private func runDaemon(paths: DaemonPaths) async throws {
         ),
         terminal: resolvedClaudeTerminal(),
         hookInstaller: resolvedClaudeHookInstaller(),
-        quotaCollector: CodexBarClaudeQuotaCollector(
-            location: CodexBarLocation.discover(),
-            run: runQuotaCommand
-        ),
-        quotaInstaller: CodexBarInstaller(
-            brewPath: CodexBarInstaller.resolveBrew(),
-            run: runQuotaCommand,
-            validate: validateCodexBar
-        )
+        statusLineInstaller: resolvedClaudeStatusLineInstaller()
     )
     let adapters: [Provider: any AgentAdapter] = [
         .codex: codexAdapter,
@@ -236,9 +198,6 @@ private func runDaemon(paths: DaemonPaths) async throws {
     do {
         try await coordinator.start()
         writeLog("provider reconciled")
-        // Quota collection runs independently of session support, so a missing
-        // or unauthenticated CodexBar never delays or blocks daemon startup.
-        await claudeAdapter.startQuotaRefresh()
         let server = try await UnixDaemonServer.bind(path: paths.socket) { command in
             await api.handle(command)
         }
@@ -259,12 +218,10 @@ private func runDaemon(paths: DaemonPaths) async throws {
         relay.cancel()
         await server.stop()
         await coordinator.stop()
-        await claudeAdapter.stopQuotaRefresh()
         await openCodeAdapter.shutdown()
         await rpc.stop()
     } catch {
         await coordinator.stop()
-        await claudeAdapter.stopQuotaRefresh()
         await openCodeAdapter.shutdown()
         await rpc.stop()
         throw error

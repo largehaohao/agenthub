@@ -130,11 +130,12 @@ transcripts are read only as bounded visible turns, and thinking blocks and tool
 inputs are excluded. AgentHub's Claude hooks are installed only by explicit user
 action and removed by exact executable path, leaving other settings untouched.
 
-Claude subscription usage is read from CodexBar's JSON CLI and stored only as
-normalized quota windows. CodexBar's stderr, account tokens, and raw output are
-never persisted; failures are recorded as coarse categories. CodexBar is
-installed only by explicit user action, with exact Homebrew arguments and no
-shell or `sudo`. See [Claude testing](claude-testing.md).
+Claude subscription usage is collected from Claude Code's own status-line
+payload and stored only as normalized quota windows. The status line also
+carries session and context details; only `rate_limits` is read, so no prompt,
+transcript path, or context content is persisted. The reporter is installed
+only by explicit user action and wraps any existing status line rather than
+replacing it. See [Claude testing](claude-testing.md).
 
 AgentHub does not copy Codex credentials into its database. It stores normalized
 session metadata, bounded visible-turn previews, request state, handoff content,
