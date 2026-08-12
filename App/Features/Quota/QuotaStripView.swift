@@ -8,21 +8,22 @@ struct QuotaStripView: View {
         if !quotas.isEmpty {
             ScrollView(.horizontal) {
                 HStack(spacing: 18) {
-                    ForEach(quotas.sorted { $0.windowDuration < $1.windowDuration }) { quota in
+                    ForEach(presentations) { quota in
                         VStack(alignment: .leading, spacing: 5) {
                             HStack {
-                                Text("\(quota.provider.rawValue.capitalized) · \(durationLabel(quota.windowDuration))")
-                                    .font(.caption.bold())
-                                if quota.isStale(now: Date()) {
+                                Text(quota.title).font(.caption.bold())
+                                if quota.isStale {
                                     Text("STALE").font(.caption2.bold()).foregroundStyle(.orange)
                                 }
                             }
                             ProgressView(value: quota.usedPercent, total: 100)
                                 .frame(width: 150)
+                                .opacity(quota.isStale ? 0.5 : 1)
                             Text("\(Int(quota.usedPercent))% used · resets \(quota.resetsAt, style: .relative)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text(quota.source)
+                            Text(quota.accountPlan.isEmpty ? quota.source
+                                 : "\(quota.accountPlan) · \(quota.source)")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -34,8 +35,10 @@ struct QuotaStripView: View {
         }
     }
 
-    private func durationLabel(_ duration: TimeInterval) -> String {
-        let hours = Int(duration / 3_600)
-        return hours >= 24 ? "\(hours / 24)d" : "\(hours)h"
+    private var presentations: [QuotaPresentation] {
+        let now = Date()
+        return quotas
+            .sorted { $0.windowDuration < $1.windowDuration }
+            .map { QuotaPresentation(window: $0, now: now) }
     }
 }

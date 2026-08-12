@@ -80,6 +80,93 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(model.state.components["claude:hooks"], component)
     }
 
+    func testInstallCodexBarRequiresExplicitViewModelAction() async {
+        let fixture = DashboardFixture()
+        let component = ProviderComponentStatus(
+            provider: .claude,
+            component: "codexbar",
+            available: true,
+            version: nil,
+            path: "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
+            message: nil,
+            changedAt: Date(timeIntervalSince1970: 1)
+        )
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            configureReply: .components([component])
+        )
+        let model = DashboardViewModel(client: client)
+        await model.connect()
+
+        await model.installCodexBar()
+
+        let commands = await client.recordedCommands
+        XCTAssertTrue(commands.contains {
+            if case .configureProvider(.claude, .installQuotaHelper) = $0 { return true }
+            return false
+        })
+        XCTAssertEqual(model.state.components["claude:codexbar"], component)
+    }
+
+    func testRefreshClaudeQuotaUsesTheQuotaAction() async {
+        let fixture = DashboardFixture()
+        let client = FakeDaemonClient(
+            snapshot: fixture.state,
+            configureReply: .components([])
+        )
+        let model = DashboardViewModel(client: client)
+        await model.connect()
+
+        await model.refreshClaudeQuota()
+
+        let commands = await client.recordedCommands
+        XCTAssertTrue(commands.contains {
+            if case .configureProvider(.claude, .refreshQuota) = $0 { return true }
+            return false
+        })
+    }
+
+    func testClaudeQuotaPresentationUsesWindowAndPlanLabels() throws {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let window = try QuotaWindow(
+            provider: .claude,
+            accountID: "user@example.com",
+            windowID: "weekly",
+            label: "Weekly",
+            plan: "Pro",
+            usedPercent: 40,
+            windowDuration: 604_800,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: Date(timeIntervalSince1970: 1_000),
+            source: "codexbar"
+        )
+
+        let item = QuotaPresentation(window: window, now: now)
+
+        XCTAssertEqual(item.title, "Claude · Weekly")
+        XCTAssertEqual(item.accountPlan, "user@example.com · Pro")
+        XCTAssertTrue(item.isStale)
+    }
+
+    func testUnlabeledQuotaPresentationFallsBackToDuration() throws {
+        let now = Date(timeIntervalSince1970: 1_100)
+        let window = try QuotaWindow(
+            provider: .codex,
+            accountID: "personal",
+            usedPercent: 10,
+            windowDuration: 18_000,
+            resetsAt: Date(timeIntervalSince1970: 600_000),
+            fetchedAt: Date(timeIntervalSince1970: 1_000),
+            source: "codex-app-server"
+        )
+
+        let item = QuotaPresentation(window: window, now: now)
+
+        XCTAssertEqual(item.title, "Codex · 5h")
+        XCTAssertEqual(item.accountPlan, "personal")
+        XCTAssertFalse(item.isStale)
+    }
+
     private func nativePlan(requestID: UUID) -> NativeInteractionPlan {
         NativeInteractionPlan(
             id: UUID(),

@@ -60,3 +60,17 @@ if rg -n -- '--dangerously-skip-permissions|bypassPermissions' Sources App >/dev
   print -u2 -- "Claude permission bypass flags are not allowed"
   exit 1
 fi
+
+# Installing software is only ever an explicit user action, so the Homebrew
+# invocation must exist in exactly one reviewable place.
+if rg -n -- 'install", "--cask|install --cask' Sources App \
+  | rg -v '^Sources/AgentHubClaude/CodexBarInstaller\.swift:' >/dev/null; then
+  print -u2 -- "Package installation must only be built in CodexBarInstaller"
+  exit 1
+fi
+
+# A quota source is never trusted enough to run through a shell.
+if rg -n 'sudo|/bin/sh|/bin/bash' Sources/AgentHubClaude >/dev/null; then
+  print -u2 -- "Claude quota commands must never use a shell or sudo"
+  exit 1
+fi

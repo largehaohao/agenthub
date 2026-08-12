@@ -80,3 +80,35 @@ through Accessibility. AgentHub therefore cannot prove which Desktop window
 holds a given request, and **always degrades to activating Claude** rather than
 acting on a window it cannot verify. Answering a Desktop request from AgentHub
 is not available; use the Claude window AgentHub brings forward.
+
+## Claude subscription usage
+
+Usage comes from CodexBar's machine-readable CLI, discovered first at
+`/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI` and then on `PATH`.
+AgentHub runs exactly:
+
+```
+codexbar usage --provider claude --source auto --format json --json-only --timeout 10
+```
+
+Only JSON is consumed — the human-readable cards and progress bars are never
+parsed, so a cosmetic CodexBar change cannot corrupt AgentHub's data.
+
+Installation happens only from **Install CodexBar** in Claude Settings, which
+runs `brew install --cask codexbar` with an exact argument array and no shell.
+Homebrew is accepted only from `/opt/homebrew/bin/brew` or `/usr/local/bin/brew`,
+and `sudo` is never used.
+
+The refresh loop polls every 5 minutes and backs off 1, 2, 4, 8, then 15 minutes
+after failures, resetting after one valid snapshot. A failure updates only the
+`codexbar` component: sessions, requests, jumps, and handoffs are unaffected,
+and the last known windows are kept so they can be shown as stale rather than
+disappearing.
+
+Source errors are reported only as coarse categories (unavailable, timeout,
+authentication required, malformed, failed). CodexBar's stderr text, account
+identifiers, and tokens are never stored or displayed. Authentication is
+repaired in CodexBar itself, in a foreground flow the user initiates.
+
+Default tests use fixtures and fake runners; they never invoke CodexBar, reach
+the network, or consume quota.

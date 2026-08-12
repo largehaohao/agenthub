@@ -18,7 +18,12 @@ struct ClaudeSettingsView: View {
         ("tmux", "tmux", "Backs managed Claude sessions so they survive window closes."),
         ("iterm", "iTerm", "Shows managed Claude sessions as a normal terminal."),
         ("accessibility", "Accessibility", "Optional. Enables exact Claude Desktop navigation."),
+        ("codexbar", "CodexBar", "Optional. Reports Claude subscription usage."),
     ]
+
+    private var codexBarInstalled: Bool {
+        components.first { $0.component == "codexbar" }?.available == true
+    }
 
     var body: some View {
         NavigationStack {
@@ -37,6 +42,24 @@ struct ClaudeSettingsView: View {
                     }
                     Text("Installing adds AgentHub's hook to your user Claude settings and "
                          + "leaves every other setting untouched.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Usage") {
+                    // Install is offered only while CodexBar is missing, and it
+                    // runs Homebrew only because the user asked for it here.
+                    if codexBarInstalled {
+                        Button("Refresh Claude Usage") {
+                            Task { await onConfigure(.refreshQuota) }
+                        }
+                    } else {
+                        Button("Install CodexBar") {
+                            Task { await onConfigure(.installQuotaHelper) }
+                        }
+                    }
+                    Text("Claude usage comes from CodexBar, a separate app installed with "
+                         + "Homebrew. AgentHub never installs it on its own, and Claude "
+                         + "sessions keep working without it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
