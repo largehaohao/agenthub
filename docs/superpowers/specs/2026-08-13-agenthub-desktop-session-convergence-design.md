@@ -1,8 +1,19 @@
 # AgentHub Desktop Session Convergence
 
-**Status:** Approved
+**Status:** Superseded, never implemented
 **Date:** 2026-08-13
+**Superseded by:** `2026-08-13-agenthub-quota-menubar-design.md`
 **Supersedes scope in:** `docs/superpowers/specs/2026-08-11-agenthub-design.md` sections 6–8
+
+> This design was approved and then abandoned before implementation. Its Codex
+> Desktop mechanism did not survive verification: `thread/list` does not expose
+> the `originator` field this document relies on, and most Codex Desktop threads
+> are not returned by a separately spawned app server at all. With Claude Desktop
+> already ruled out, only Cursor remained, and session management was dropped
+> entirely in favour of a quota-only panel.
+>
+> It is kept because section 4 records the Claude Desktop investigation, which
+> remains accurate and is worth not repeating.
 
 ## 1. Context
 
