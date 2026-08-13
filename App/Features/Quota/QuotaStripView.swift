@@ -7,7 +7,7 @@ struct QuotaStripView: View {
     var onRefresh: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             if rows.isEmpty {
                 Text("No quota reported yet")
@@ -21,6 +21,18 @@ struct QuotaStripView: View {
             }
         }
         .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The strip is rebuilt on every daemon state change. Implicit
+        // animations restart on each rebuild, and cells could be left stranded
+        // mid-transition -- faded and blurred rather than drawn.
+        .transaction { $0.animation = nil }
+        // The window behind this strip is translucent, so any area the strip
+        // does not paint shows a blurred desktop rather than an empty cell.
+        .background(Color(nsColor: .windowBackgroundColor))
+        // NavigationSplitView below this strip is greedy, and without this the
+        // strip is compressed below its ideal height: rows then overlap, text is
+        // clipped, and a whole provider row can render blank.
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var header: some View {
@@ -61,12 +73,16 @@ private struct QuotaProviderRowView: View {
                 .frame(width: 62, alignment: .leading)
                 .padding(.top, 1)
 
-            ScrollView(.horizontal) {
-                HStack(spacing: 16) {
-                    ForEach(row.windows) { window in
-                        QuotaWindowView(window: window, tint: row.provider.accentColor)
-                    }
+            // Deliberately not a ScrollView. A row whose cells overflow becomes
+            // scrollable, and macOS then applies a scroll-edge effect that
+            // blurs the whole row -- which is why only Cursor, the widest row,
+            // rendered as an unreadable smear. A provider reports at most a
+            // handful of windows, so a plain row of fixed-width cells fits.
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(row.windows) { window in
+                    QuotaWindowView(window: window, tint: row.provider.accentColor)
                 }
+                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal)
@@ -89,7 +105,7 @@ private struct QuotaWindowView: View {
             }
             ProgressView(value: window.usedPercent, total: 100)
                 .tint(window.hasElapsed ? .gray : tint)
-                .frame(width: 140)
+                .frame(width: 150)
                 .opacity(window.informsRecommendations ? 1 : 0.5)
             // An elapsed window's reset time is in the past, so "resets in ..."
             // would read as a countdown that already fired.
@@ -98,6 +114,27 @@ private struct QuotaWindowView: View {
                  : "\(window.displayPercent) used · resets \(window.resetsAt, style: .relative)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        // A uniform cell width keeps every provider's windows on the same
+        // vertical gridlines and stops a long caption from shifting the row.
+        .frame(width: 175, alignment: .leading)
+    }
+}
+
+extension View {
+    /// Turns off the soft scroll-edge effect introduced on macOS 26.
+    ///
+    /// The effect is applied across the split view's width and bleeds over the
+    /// quota strip above it, progressively blurring everything past the sidebar
+    /// edge. It is a no-op before macOS 26, which has no such effect.
+    @ViewBuilder
+    func quotaStripLegibleScrollEdges() -> some View {
+        if #available(macOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.hard, for: .all)
+        } else {
+            self
         }
     }
 }

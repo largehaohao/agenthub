@@ -13,6 +13,17 @@ struct DashboardView: View {
     }
 
     var body: some View {
+        dashboard
+            // macOS 26 gives scroll containers a soft edge effect. The split
+            // view below applies it across the panes' full width, which blurs
+            // the quota strip sitting above them -- Cursor's row, the widest,
+            // was smeared into an unreadable band. A hard edge keeps the strip
+            // legible; on earlier systems there is no such effect to disable.
+            .quotaStripLegibleScrollEdges()
+    }
+
+    @ViewBuilder
+    private var dashboard: some View {
         VStack(spacing: 0) {
             AdapterHealthView(health: model.state.adapterHealth)
             QuotaStripView(
