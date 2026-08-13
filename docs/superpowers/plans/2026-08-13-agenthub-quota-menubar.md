@@ -4,7 +4,7 @@
 
 **Goal:** Turn AgentHub into a resident menu bar panel that shows subscription usage for Claude, Codex, Cursor, and OpenCode, and delete everything else.
 
-**Architecture:** One SwiftUI application with no daemon, no IPC, and no database. A new `AgentHubQuota` module holds the four quota readers and the `QuotaWindow` model; `AgentHubSecurity` keeps Keychain access; the app renders an `NSStatusItem` whose hover shows a non-activating panel. Fourteen modules become three.
+**Architecture:** One SwiftUI application with no daemon, no IPC, and no database. A new `AgentHubQuota` module holds the four quota readers and the `QuotaWindow` model; the app renders an `NSStatusItem` whose hover shows a non-activating panel. Fourteen modules become two.
 
 **Tech Stack:** Swift 6, SwiftUI + AppKit (`NSStatusItem`, `NSPanel`), XCTest, xcodegen, SQLite3 (Cursor token read), Security.framework (Keychain).
 
@@ -137,7 +137,6 @@ and to `targets`:
 ```swift
 .target(
     name: "AgentHubQuota",
-    dependencies: ["AgentHubSecurity"],
     linkerSettings: [
         .linkedFramework("Security"),
         .linkedLibrary("sqlite3"),
@@ -1870,11 +1869,11 @@ git commit -m "feat: remove the legacy daemon and provider hooks on first launch
 git rm -r Sources/agenthubd Sources/AgentHubDaemon Sources/AgentHubIPC \
   Sources/AgentHubPersistence Sources/AgentHubCore Sources/AgentHubClaude \
   Sources/AgentHubCursor Sources/AgentHubOpenCode Sources/AgentHubCodex \
-  Sources/AgentHubTestSupport Sources/agenthub-claude-hook \
+  Sources/AgentHubTestSupport Sources/AgentHubSecurity Sources/agenthub-claude-hook \
   Sources/agenthub-claude-statusline Sources/agenthub-cursor-hook
 git rm -r Tests/AgentHubCoreTests Tests/AgentHubDaemonTests Tests/AgentHubIPCTests \
   Tests/AgentHubPersistenceTests Tests/AgentHubCodexTests Tests/AgentHubClaudeTests \
-  Tests/AgentHubCursorTests Tests/AgentHubOpenCodeTests Tests/AgentHubOpenCodeTestSupport
+  Tests/AgentHubCursorTests Tests/AgentHubOpenCodeTests Tests/AgentHubOpenCodeTestSupport Tests/AgentHubSecurityTests
 git rm -r App/Features/Dashboard App/Features/Sessions App/Features/Requests \
   App/Features/Health App/Features/Claude App/Features/OpenCode App/Features/Cursor \
   App/Features/Quota
@@ -1901,23 +1900,16 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "AgentHubQuota", targets: ["AgentHubQuota"]),
-        .library(name: "AgentHubSecurity", targets: ["AgentHubSecurity"]),
     ],
     targets: [
         .target(
-            name: "AgentHubSecurity",
-            linkerSettings: [.linkedFramework("Security")]
-        ),
-        .target(
             name: "AgentHubQuota",
-            dependencies: ["AgentHubSecurity"],
             linkerSettings: [
                 .linkedFramework("Security"),
                 .linkedLibrary("sqlite3"),
             ]
         ),
         .testTarget(name: "AgentHubQuotaTests", dependencies: ["AgentHubQuota"]),
-        .testTarget(name: "AgentHubSecurityTests", dependencies: ["AgentHubSecurity"]),
     ]
 )
 ```

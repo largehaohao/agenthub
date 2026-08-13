@@ -55,11 +55,14 @@ application is always resident, so it does that job by being what it is.
 
 ```
 AgentHubApp  (LSUIElement, NSStatusItem)
-    ├── AgentHubQuota     four readers + QuotaWindow
-    └── AgentHubSecurity  Keychain access
+    └── AgentHubQuota  four readers + QuotaWindow
 ```
 
-Three modules, down from fourteen.
+Two modules, down from fourteen.
+
+`AgentHubSecurity` is deleted with the rest. Its `KeychainCredentialStore`
+existed for OpenCode endpoint credentials, which go with sessions; the quota
+readers link `Security.framework` and `sqlite3` directly and never used it.
 
 ### Deleted
 
