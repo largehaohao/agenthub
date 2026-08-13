@@ -160,6 +160,45 @@ final class ClaudeStatusLineIngestTests: XCTestCase {
         XCTAssertEqual(fiveHour.first?.usedPercent, 33)
     }
 
+    /// Anthropic sends `resets_at` with fractional seconds
+    /// ("2026-08-12T14:50:00.458358+00:00"). A plain ISO8601 parser rejects
+    /// those, and the window was then dropped without a trace, so Claude usage
+    /// silently froze at whatever the usage cache last held.
+    func testFractionalSecondResetTimesAreParsed() async throws {
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+
+        try await adapter.ingest(try envelope(Data("""
+        {"session_id":"abc123","rate_limits":{
+        "five_hour":{"used_percentage":11,
+        "resets_at":"2026-08-14T14:50:00.458358+00:00"},
+        "seven_day":{"used_percentage":22,
+        "resets_at":"2026-08-17T01:00:00.458381+00:00"}}}
+        """.utf8)))
+
+        let snapshot = try await adapter.reconcile()
+        XCTAssertEqual(snapshot.quotas.count, 2)
+        XCTAssertEqual(snapshot.quotas.map(\.usedPercent).sorted(), [11, 22])
+    }
+
+    /// Timestamps without fractional seconds must keep working.
+    func testWholeSecondResetTimesStillParse() async throws {
+        let adapter = ClaudeAdapter(
+            accountID: "personal",
+            now: { Date(timeIntervalSince1970: 1_000) }
+        )
+
+        try await adapter.ingest(try envelope(Data("""
+        {"session_id":"abc123","rate_limits":{
+        "five_hour":{"used_percentage":11,"resets_at":"2026-08-14T14:50:00Z"}}}
+        """.utf8)))
+
+        let snapshot = try await adapter.reconcile()
+        XCTAssertEqual(snapshot.quotas.count, 1)
+    }
+
     private func makeUsageCache(
         fiveHour: Double,
         fetchedAtMs: Double

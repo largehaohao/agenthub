@@ -259,7 +259,33 @@ final class DashboardViewModelTests: XCTestCase {
         let rows = QuotaProviderRow.rows(from: windows, now: now)
 
         XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].windows.map(\.title), ["31d · Auto", "31d · API", "31d · Total"])
+        XCTAssertEqual(rows[0].windows.map(\.title), ["31d · API", "31d · Auto", "31d · Total"])
+    }
+
+    /// Windows arrive from a dictionary, so the incoming order is arbitrary.
+    /// Any permutation must render in the same order or the strip reshuffles
+    /// on every refresh.
+    func testSameDurationWindowsOrderIndependentlyOfInputOrder() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let resets = Date(timeIntervalSince1970: 2_700_000)
+        func window(_ id: String, _ label: String) throws -> QuotaWindow {
+            try QuotaWindow(
+                provider: .cursor, accountID: "a", windowID: id, label: label,
+                usedPercent: 10, windowDuration: 31 * 24 * 3_600,
+                resetsAt: resets, fetchedAt: now, source: "cursor-dashboard"
+            )
+        }
+        let api = try window("api", "API")
+        let auto = try window("auto", "Auto")
+        let total = try window("total", "Total")
+        let expected = ["31d · API", "31d · Auto", "31d · Total"]
+
+        for permutation in [[api, auto, total], [total, api, auto], [auto, total, api]] {
+            XCTAssertEqual(
+                QuotaProviderRow.rows(from: permutation, now: now)[0].windows.map(\.title),
+                expected
+            )
+        }
     }
 
     /// A provider whose windows all have distinct durations keeps the short

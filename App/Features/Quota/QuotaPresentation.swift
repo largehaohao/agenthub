@@ -75,15 +75,15 @@ struct QuotaProviderRow: Identifiable, Equatable {
                     id: provider.rawValue,
                     provider: provider,
                     windows: windows
-                        // Ties keep the provider's reported order stable so the
-                        // strip does not reshuffle between refreshes.
-                        .enumerated()
+                        // Windows arrive from a dictionary, so their incoming
+                        // order is arbitrary and changes between refreshes.
+                        // Ties break on window id, which is stable and gives
+                        // Cursor its api / auto / total reading order.
                         .sorted {
-                            $0.element.windowDuration == $1.element.windowDuration
-                                ? $0.offset < $1.offset
-                                : $0.element.windowDuration < $1.element.windowDuration
+                            $0.windowDuration == $1.windowDuration
+                                ? ($0.windowID ?? "") < ($1.windowID ?? "")
+                                : $0.windowDuration < $1.windowDuration
                         }
-                        .map(\.element)
                         .map {
                             QuotaPresentation(
                                 window: $0,

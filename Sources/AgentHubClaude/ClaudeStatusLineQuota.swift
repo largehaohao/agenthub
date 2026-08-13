@@ -98,7 +98,13 @@ public struct ClaudeStatusLineDecoder: Sendable {
 
     private static func timestamp(_ value: Any?) -> Date? {
         if let text = value as? String {
-            return ISO8601DateFormatter().date(from: text)
+            // Anthropic sends fractional seconds
+            // ("2026-08-12T14:50:00.458358+00:00"), which the plain parser
+            // rejects. A rejected reset time dropped the whole window silently,
+            // freezing usage at whatever was last read from the usage cache.
+            let withFraction = ISO8601DateFormatter()
+            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return withFraction.date(from: text) ?? ISO8601DateFormatter().date(from: text)
         }
         if let seconds = double(value) {
             return Date(timeIntervalSince1970: seconds)
