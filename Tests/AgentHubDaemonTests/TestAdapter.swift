@@ -97,3 +97,25 @@ actor TestAdapter: EndpointConfigurableAdapter {
         launchDelay = delay
     }
 }
+
+/// Records explicit quota-refresh requests so the coordinator's force path can
+/// be verified without touching a network.
+actor ForceRefreshRecordingAdapter: QuotaForceRefreshing {
+    nonisolated let provider: Provider = .openCode
+    private(set) var forcedCount = 0
+
+    func forceQuotaRefresh() async { forcedCount += 1 }
+
+    func capabilities() async -> [Capability: ReliabilityLevel] { [:] }
+    func launch(_ request: LaunchRequest) async throws -> ProviderSessionRef { .fixture() }
+    func reconcile() async throws -> AdapterSnapshot {
+        AdapterSnapshot(sessions: [], nodes: [], requests: [], quotas: [])
+    }
+    func eventStream() async -> AsyncStream<AgentEvent> { AsyncStream { $0.finish() } }
+    func recentTurns(for session: ProviderSessionRef, limit: Int) async throws -> [VisibleTurn] { [] }
+    func send(_ input: AgentInput, to session: ProviderSessionRef) async throws {}
+    func resolve(_ request: ProviderRequestRef, decision: RequestDecision) async throws {}
+    func jumpTarget(for session: ProviderSessionRef) async -> JumpTarget {
+        .agentHubDetail(sessionNativeID: session.nativeID)
+    }
+}

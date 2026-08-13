@@ -10,7 +10,7 @@ public enum CursorAdapterError: Error, Equatable, Sendable {
 
 /// Normalizes local Cursor IDE Agent Chat hooks into AgentHub sessions,
 /// nodes, and permission requests. There is no managed launch path.
-public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermissionProducingAdapter, ProviderConfigurableAdapter {
+public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermissionProducingAdapter, ProviderConfigurableAdapter, QuotaForceRefreshing {
     public nonisolated var provider: Provider { .cursor }
 
     /// Verified Cursor.app bundle id on macOS (Cursor / Todesktop wrapper).
@@ -464,6 +464,14 @@ public actor CursorAdapter: AgentAdapter, HookEventIngestingAdapter, HookPermiss
         for continuation in continuations.values {
             continuation.yield(event)
         }
+    }
+
+    /// Polls cursor.com on a long interval, so an explicit user refresh fetches
+    /// now instead of waiting for the next tick.
+    public func forceQuotaRefresh() async {
+        guard let quotaCollector, await quotaCollector.isAuthorized else { return }
+        _ = try? await quotaCollector.refresh()
+        await syncQuotaWindows(from: quotaCollector)
     }
 
     private func syncQuotaWindows(from collector: CursorQuotaCollector) async {

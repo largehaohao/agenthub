@@ -387,6 +387,53 @@ final class OpenCodeHybridAdapterTests: XCTestCase {
         XCTAssertTrue(snapshot.sessions.isEmpty)
     }
 
+    /// An auto-discovered server that wants a password is a fact about the
+    /// machine, not a task for the user: it reappears on every reconcile and
+    /// cannot be dismissed. Only an endpoint the user attached themselves
+    /// justifies an inbox prompt.
+    func testDiscoveredEndpointNeedingAuthCreatesNoRequest() async throws {
+        let adapter = makeAdapter(
+            endpoints: [
+                unauthenticated("desktop", origin: .desktop),
+                unauthenticated("tui", origin: .tui),
+            ],
+            clients: [:]
+        )
+
+        let snapshot = try await adapter.reconcile()
+
+        XCTAssertTrue(
+            snapshot.requests.filter { $0.kind == .authentication }.isEmpty,
+            "discovered endpoints must not raise an authentication request"
+        )
+        // The endpoint is still surfaced, just as not connected.
+        XCTAssertEqual(snapshot.endpoints.count, 2)
+        XCTAssertTrue(snapshot.endpoints.allSatisfy { !$0.connected })
+    }
+
+    func testManuallyAttachedEndpointNeedingAuthStillPrompts() async throws {
+        let adapter = makeAdapter(
+            endpoints: [unauthenticated("manual-1", origin: .manual)],
+            clients: [:]
+        )
+
+        let snapshot = try await adapter.reconcile()
+
+        let auth = snapshot.requests.filter { $0.kind == .authentication }
+        XCTAssertEqual(auth.count, 1)
+        XCTAssertEqual(auth.first?.threadID, "manual-1")
+    }
+
+    private func unauthenticated(
+        _ id: String,
+        origin: ProviderEndpointOrigin
+    ) -> OpenCodeRuntimeEndpoint {
+        var runtime = endpoint(id, origin: origin)
+        runtime.summary.connected = false
+        runtime.summary.message = "authenticationRequired"
+        return runtime
+    }
+
     private func makeAdapter(
         endpoints: [OpenCodeRuntimeEndpoint],
         clients: [String: any OpenCodeAPI],

@@ -313,6 +313,11 @@ public actor Coordinator {
         for provider in adapters.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
             guard let adapter = adapters[provider] else { continue }
             do {
+                // Adapters that rate-limit an external usage API need telling
+                // that this refresh is deliberate rather than a routine tick.
+                if let forceable = adapter as? any QuotaForceRefreshing {
+                    await forceable.forceQuotaRefresh()
+                }
                 let snapshot = try await adapter.reconcile()
                 try await merge(snapshot, provider: provider, publish: true)
                 try await persistAndReduce(

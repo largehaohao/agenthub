@@ -185,7 +185,11 @@ private func runDaemon(paths: DaemonPaths) async throws {
         discovery: openCodeDiscovery,
         credentialStore: credentialStore,
         // Reads the CLI's own subscription key per request; never persisted.
-        goQuotaClient: OpenCodeGoQuotaClient()
+        // Rate-limited so reconcile does not call opencode.ai continuously.
+        goQuotaCache: {
+            let client = OpenCodeGoQuotaClient()
+            return OpenCodeGoQuotaCache { await client.fetch() }
+        }()
     )
     let claudeAdapter = ClaudeAdapter(
         accountID: "default",
@@ -203,7 +207,10 @@ private func runDaemon(paths: DaemonPaths) async throws {
     let cursorQuotaCollector = CursorQuotaCollector(
         auth: cursorQuotaAuth,
         reader: CursorLoginSessionReader(),
-        client: CursorQuotaClient(accountID: "default")
+        client: CursorQuotaClient(accountID: "default"),
+        // cursor.com is an external API and a billing-cycle percentage moves
+        // slowly, so poll well inside the 15-minute staleness TTL but no faster.
+        pollInterval: .seconds(900)
     )
     let cursorAdapter = CursorAdapter(
         accountID: "default",

@@ -9,7 +9,7 @@ public enum OpenCodeAdapterError: Error, Equatable, Sendable {
     case unsupportedEndpoint
 }
 
-public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
+public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter, QuotaForceRefreshing {
     public nonisolated let provider: Provider = .openCode
 
     private let accountID: String
@@ -17,8 +17,9 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
     private let managedServer: any ManagedOpenCodeServing
     private let discovery: any OpenCodeEndpointDiscovering
     private let credentialStore: any CredentialStoring
-    /// Subscription usage for OpenCode Go. Absent when the CLI is not signed in.
-    private let goQuotaClient: OpenCodeGoQuotaClient?
+    /// Subscription usage for OpenCode Go, rate-limited so `reconcile()` does
+    /// not call an external service on every session change.
+    private let goQuotaCache: OpenCodeGoQuotaCache?
     private let clientFactory: @Sendable (OpenCodeRuntimeEndpoint) -> any OpenCodeAPI
     private let now: @Sendable () -> Date
     private let events: AsyncStream<AgentEvent>
@@ -42,7 +43,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         managedServer: any ManagedOpenCodeServing,
         discovery: any OpenCodeEndpointDiscovering,
         credentialStore: any CredentialStoring,
-        goQuotaClient: OpenCodeGoQuotaClient? = nil,
+        goQuotaCache: OpenCodeGoQuotaCache? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.accountID = accountID
@@ -50,7 +51,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         self.managedServer = managedServer
         self.discovery = discovery
         self.credentialStore = credentialStore
-        self.goQuotaClient = goQuotaClient
+        self.goQuotaCache = goQuotaCache
         clientFactory = Self.makeHTTPClient
         self.now = now
         let pair = AsyncStream<AgentEvent>.makeStream()
@@ -66,7 +67,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         credentialStore: any CredentialStoring,
         clientFactory: @escaping @Sendable (OpenCodeRuntimeEndpoint) -> any OpenCodeAPI,
         // Defaults to nil so unit tests never reach the live usage endpoint.
-        goQuotaClient: OpenCodeGoQuotaClient? = nil,
+        goQuotaCache: OpenCodeGoQuotaCache? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.accountID = accountID
@@ -74,7 +75,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
         self.managedServer = managedServer
         self.discovery = discovery
         self.credentialStore = credentialStore
-        self.goQuotaClient = goQuotaClient
+        self.goQuotaCache = goQuotaCache
         self.clientFactory = clientFactory
         self.now = now
         let pair = AsyncStream<AgentEvent>.makeStream()
@@ -128,6 +129,12 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             input: AgentInput(text: request.prompt, provenance: "AgentHub launch")
         )
         return reference
+    }
+
+    /// Bypasses the usage-API rate limit for an explicit user refresh, so the
+    /// refresh button is never a no-op inside the throttle interval.
+    public func forceQuotaRefresh() async {
+        _ = await goQuotaCache?.windows(force: true)
     }
 
     public func reconcile() async throws -> AdapterSnapshot {
@@ -208,9 +215,15 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             }
         }
 
+        // Only an endpoint the user attached themselves earns an inbox prompt.
+        // A discovered server that wants a password is a fact about the machine:
+        // the request regenerates on every reconcile and cannot be dismissed, so
+        // it would sit in the inbox permanently. Such endpoints are still listed,
+        // just as not connected, and can be authenticated from OpenCode Settings.
         for endpoint in endpointsByID.values
         where !endpoint.summary.connected
-            && endpoint.summary.message == "authenticationRequired" {
+            && endpoint.summary.message == "authenticationRequired"
+            && endpoint.summary.origin == .manual {
             let requestID = "authenticate:\(endpoint.id)"
             requestsByProviderID[requestID] = PendingRequest(
                 id: stableOpenCodeUUID(accountID: accountID, nativeID: "request:\(requestID)"),
@@ -291,7 +304,7 @@ public actor OpenCodeHybridAdapter: EndpointConfigurableAdapter {
             sessions: sessions,
             nodes: nodes,
             requests: requests,
-            quotas: await goQuotaClient?.fetch() ?? [],
+            quotas: await goQuotaCache?.windows() ?? [],
             endpoints: endpointsByID.values.map(\.summary).sorted { $0.id < $1.id },
             requestsAreAuthoritative: true
         )

@@ -117,6 +117,11 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    /// Authenticates an endpoint that is already known to the daemon.
+    ///
+    /// The request inbox no longer asks for a password out of context; OpenCode
+    /// authentication is completed from OpenCode Settings, which is also where
+    /// this is reachable from.
     func authenticateOpenCode(endpointID: String, password: String) async {
         guard let password = nonempty(password) else { return }
         let reference = "opencode:\(UUID().uuidString)"

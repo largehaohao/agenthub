@@ -132,6 +132,22 @@ final class CoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    /// Adapters that throttle an external usage API must be told a refresh is
+    /// deliberate, or the button would return the throttled cache and look
+    /// broken.
+    func testRefreshQuotasForcesAdaptersThatRateLimitTheirAPI() async throws {
+        let store = try makeCoordinatorStore()
+        let adapter = ForceRefreshRecordingAdapter()
+        let coordinator = Coordinator(store: store, adapters: [.openCode: adapter])
+        try await coordinator.start()
+
+        try await coordinator.refreshQuotas()
+
+        let forced = await adapter.forcedCount
+        XCTAssertEqual(forced, 1)
+        await coordinator.stop()
+    }
+
     /// One failing provider must not stop the others from refreshing.
     func testRefreshQuotasContinuesWhenOneAdapterFails() async throws {
         let store = try makeCoordinatorStore()

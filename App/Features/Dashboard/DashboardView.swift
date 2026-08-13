@@ -52,12 +52,6 @@ struct DashboardView: View {
                     canResolve: model.canResolve,
                     onResolve: { id, decision in
                         await model.resolve(id, decision: decision)
-                    },
-                    onAuthenticate: { endpointID, password in
-                        await model.authenticateOpenCode(
-                            endpointID: endpointID,
-                            password: password
-                        )
                     }
                 )
                 .navigationSplitViewColumnWidth(min: 280, ideal: 330, max: 420)
@@ -73,6 +67,11 @@ struct DashboardView: View {
                     .padding()
             }
         }
+        // NavigationSplitView inserts its own sidebar toggle into the window
+        // title bar. The split view sits below the health bar and quota strip,
+        // so that button appears detached from the list it collapses; the
+        // sidebar is always wanted here anyway.
+        .toolbar(removing: .sidebarToggle)
         .toolbar {
             ToolbarItemGroup {
                 connectionLabel

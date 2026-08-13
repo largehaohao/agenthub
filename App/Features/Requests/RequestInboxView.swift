@@ -5,10 +5,13 @@ struct RequestInboxView: View {
     let requests: [PendingRequest]
     let canResolve: (UUID) -> Bool
     let onResolve: (UUID, RequestDecision) async -> Void
-    let onAuthenticate: (String, String) async -> Void
 
     private var actionable: [PendingRequest] {
         requests
+            // Authentication is completed in OpenCode Settings, where the user
+            // chooses the endpoint deliberately, rather than from a card that
+            // asks for a password out of context.
+            .filter { $0.kind != .authentication }
             .filter { $0.state == .pending || $0.state == .resolving }
             .sorted { $0.createdAt > $1.createdAt }
     }
@@ -18,8 +21,7 @@ struct RequestInboxView: View {
             RequestCard(
                 request: request,
                 canResolve: canResolve(request.id),
-                onResolve: onResolve,
-                onAuthenticate: onAuthenticate
+                onResolve: onResolve
             )
         }
         .navigationTitle("Requests")
@@ -35,11 +37,9 @@ private struct RequestCard: View {
     let request: PendingRequest
     let canResolve: Bool
     let onResolve: (UUID, RequestDecision) async -> Void
-    let onAuthenticate: (String, String) async -> Void
 
     @State private var selectedChoices: [String: Set<String>] = [:]
     @State private var freeText: [String: String] = [:]
-    @State private var password = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -58,8 +58,6 @@ private struct RequestCard: View {
                 .foregroundStyle(.secondary)
 
             switch request.kind {
-            case .authentication:
-                authenticationControls
             case .choice where !request.fields.isEmpty:
                 questionControls
             case .permission where request.provider == .openCode:
@@ -142,22 +140,6 @@ private struct RequestCard: View {
         }
     }
 
-    private var authenticationControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SecureField("OpenCode password", text: $password)
-            HStack {
-                Spacer()
-                Button("Authenticate") {
-                    let submitted = password
-                    password = ""
-                    Task { await onAuthenticate(request.threadID, submitted) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(password.isEmpty || !canResolve)
-            }
-        }
-    }
-
     private func resolve(_ decision: RequestDecision) {
         clearSensitiveInputs()
         Task { await onResolve(request.id, decision) }
@@ -207,6 +189,5 @@ private struct RequestCard: View {
     private func clearSensitiveInputs() {
         selectedChoices.removeAll()
         freeText.removeAll()
-        password = ""
     }
 }

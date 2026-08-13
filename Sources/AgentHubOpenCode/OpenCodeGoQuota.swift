@@ -104,6 +104,51 @@ public struct OpenCodeGoKeyReader: Sendable {
     }
 }
 
+/// Rate-limits calls to the OpenCode Go usage API.
+///
+/// `reconcile()` runs on every session change, hook delivery, and quota tick,
+/// while subscription usage moves slowly. Without this the adapter would call an
+/// external service many times a minute. A failed refresh keeps the previous
+/// reading rather than blanking the strip, per §11 of the design.
+public actor OpenCodeGoQuotaCache {
+    /// Quota windows are only excluded from recommendations after 15 minutes,
+    /// so refreshing faster than that buys nothing.
+    public static let defaultInterval: TimeInterval = 900
+
+    private let minimumInterval: TimeInterval
+    private let now: @Sendable () -> Date
+    private let fetch: @Sendable () async -> [QuotaWindow]
+
+    private var cached: [QuotaWindow] = []
+    private var lastAttempt: Date?
+
+    public init(
+        minimumInterval: TimeInterval = OpenCodeGoQuotaCache.defaultInterval,
+        now: @escaping @Sendable () -> Date = { Date() },
+        fetch: @escaping @Sendable () async -> [QuotaWindow]
+    ) {
+        self.minimumInterval = minimumInterval
+        self.now = now
+        self.fetch = fetch
+    }
+
+    /// - Parameter force: bypasses the interval for an explicit user refresh.
+    public func windows(force: Bool = false) async -> [QuotaWindow] {
+        if !force, let lastAttempt,
+           now().timeIntervalSince(lastAttempt) < minimumInterval {
+            return cached
+        }
+        lastAttempt = now()
+        let fetched = await fetch()
+        // An empty result means the call failed or the CLI is signed out; the
+        // last real reading is more useful than nothing.
+        if !fetched.isEmpty {
+            cached = fetched
+        }
+        return cached
+    }
+}
+
 /// Fetches OpenCode Go usage over HTTPS.
 public struct OpenCodeGoQuotaClient: Sendable {
     public static let endpoint = URL(string: "https://opencode.ai/zen/go/v1/usage")!

@@ -51,6 +51,13 @@ public protocol ProviderConfigurableAdapter: AgentAdapter {
     ) async throws -> [ProviderComponentStatus]
 }
 
+/// An adapter whose quota comes from an external API it deliberately calls
+/// less often than it reconciles. An explicit user refresh must still reach the
+/// provider rather than returning the throttled cache.
+public protocol QuotaForceRefreshing: AgentAdapter {
+    func forceQuotaRefresh() async
+}
+
 public protocol EndpointConfigurableAdapter: AgentAdapter {
     func restoreEndpoint(_ endpoint: ProviderEndpoint) async throws
     func attachEndpoint(_ attachment: ProviderEndpointAttachment) async throws -> ProviderEndpoint
