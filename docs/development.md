@@ -1,169 +1,62 @@
 # Development and operations
 
-Run all commands from the AgentHub worktree root.
+Run all commands from the repository root.
 
 ## Verify and build
 
-The complete local gate builds the Swift package, validates the LaunchAgent,
-runs package tests, regenerates the Xcode project, runs app tests, and checks
-that the embedded daemon has no Xcode build-directory runtime dependency:
+The complete local gate runs the package tests, regenerates the Xcode project,
+runs the app test bundle, and checks the source rules:
 
 ```bash
-./scripts/check.sh
+zsh scripts/check.sh
 ```
 
-To build the app without running tests:
+To build and launch the app on its own:
 
 ```bash
 xcodegen generate
-xcodebuild \
-  -project AgentHub.xcodeproj \
-  -scheme AgentHubApp \
-  -configuration Debug \
-  -destination 'platform=macOS' \
-  -derivedDataPath .build/xcode \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-Launch the built app against the real daemon:
-
-```bash
+xcodebuild -project AgentHub.xcodeproj -scheme AgentHubApp \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build
 open .build/xcode/Build/Products/Debug/AgentHubApp.app
 ```
 
-Install the current development build for this macOS user:
+AgentHub is an `LSUIElement`: no Dock icon, no window, just the menu bar item.
+`pgrep -f AgentHubApp` is the quickest check that it is running.
+
+## Layout
+
+| Path | What lives there |
+|---|---|
+| `Sources/AgentHubQuota` | The four provider readers, `QuotaWindow`, and `QuotaService` |
+| `Sources/AgentHubQuota/CodexRPC` | JSON-RPC plumbing for the Codex app server |
+| `App/MenuBar` | Status item, hover behaviour, the panel and its presentation |
+| `App/Settings` | Cursor authorisation, shortcut display |
+| `App/Migration` | Removes the daemon and hooks older versions installed |
+
+## Testing usage sources by hand
+
+Each reader can be checked against the provider directly. Claude, for example:
 
 ```bash
-mkdir -p "$HOME/Applications"
-ditto .build/xcode/Build/Products/Debug/AgentHubApp.app \
-  "$HOME/Applications/AgentHub.app"
-open "$HOME/Applications/AgentHub.app"
+TOK=$(security find-generic-password -s "Claude Code-credentials" -w \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])")
+curl -s -H "Authorization: Bearer $TOK" -H "anthropic-beta: oauth-2025-04-20" \
+  https://api.anthropic.com/api/oauth/usage | python3 -m json.tool | head -12
 ```
 
-Launch the deterministic UI fixture without contacting Codex:
+The panel should show the same `five_hour` and `seven_day` figures.
 
-```bash
-AGENTHUB_FIXTURE_MODE=1 \
-  .build/xcode/Build/Products/Debug/AgentHubApp.app/Contents/MacOS/AgentHubApp
-```
+Cursor usage only works after authorising it in Settings; until then that
+provider reports nothing, which is the intended signed-out state rather than an
+error.
 
-## Install the background daemon
+## Source rules
 
-Installation is scoped to the current macOS user and never requires `sudo`.
-The build embeds a standalone helper in the app bundle. Preview the operation,
-then install that helper:
+`scripts/check.sh` fails the build if either is broken:
 
-```bash
-AGENTHUB_DAEMON_SOURCE="$HOME/Applications/AgentHub.app/Contents/Helpers/agenthubd" \
-  ./Support/install-daemon.sh --dry-run
-
-AGENTHUB_DAEMON_SOURCE="$HOME/Applications/AgentHub.app/Contents/Helpers/agenthubd" \
-  ./Support/install-daemon.sh
-```
-
-Inspect service state and logs:
-
-```bash
-launchctl print "gui/$(id -u)/com.agenthub.daemon"
-ls -l "$HOME/Library/Application Support/AgentHub/agenthub.sock"
-tail -n 100 "$HOME/Library/Application Support/AgentHub/Logs/agenthubd.log"
-tail -n 100 "$HOME/Library/Application Support/AgentHub/Logs/agenthubd.error.log"
-```
-
-Installed files:
-
-- `~/Library/Application Support/AgentHub/bin/agenthubd` (`0700`)
-- `~/Library/LaunchAgents/com.agenthub.daemon.plist` (`0600`)
-- `~/Library/Application Support/AgentHub/agenthub.sqlite`
-- `~/Library/Application Support/AgentHub/agenthub.sock` (`0600`)
-- `~/Library/Application Support/AgentHub/Logs/`
-
-Uninstall stops the service and moves the installed plist and executable to
-Trash, making that part recoverable. It intentionally retains the database and
-logs:
-
-```bash
-./Support/uninstall-daemon.sh --dry-run
-./Support/uninstall-daemon.sh
-```
-
-## Tests
-
-Run only the deterministic vertical slice and privacy acceptance tests:
-
-```bash
-swift test --filter CodexVerticalSliceTests
-swift test --filter PrivacyTests
-```
-
-The live test uses the installed, logged-in Codex CLI. It creates a temporary
-thread, requests exactly `READY` without tools, reads quota data, and archives
-the thread. It uses approval policy `never` and a read-only sandbox. Run it only
-when that real account-side action is intended:
-
-```bash
-AGENTHUB_RUN_LIVE_CODEX_TESTS=1 swift test --filter LiveCodexTests
-```
-
-Claude tests are fixture-only by default and never submit a prompt, read real
-transcripts, modify `~/.claude/settings.json`, launch iTerm, or request
-Accessibility. Two separate opt-in flags exist:
-
-```bash
-AGENTHUB_LIVE_CLAUDE_SMOKE=1 swift test --filter LiveClaudeTests   # no prompt, no quota
-AGENTHUB_LIVE_CLAUDE_PROMPT=1 swift test --filter LiveClaudeTests  # CONSUMES quota
-```
-
-See [Claude testing](claude-testing.md) for the full boundaries.
-
-Cursor tests are fixture-only by default and never submit a prompt, read real
-Cursor login material, call live usage APIs, or modify `~/.cursor/hooks.json`:
-
-```bash
-swift test --filter CursorVerticalSliceTests
-swift test --filter CursorQuotaPrivacyTests
-```
-
-See [Cursor testing](cursor-testing.md) for hook install boundaries and usage
-authorization.
-
-The app-server protocol is currently treated as an experimental local
-integration. Test request shapes are aligned with the schema generated by the
-installed CLI (`codex app-server generate-json-schema`) and may need updating
-when the CLI changes.
-
-## Privacy and local data
-
-Claude hook payloads are normalized on arrival and discarded: the raw hook JSON,
-its tool input, and the invoking environment are never persisted. Claude
-transcripts are read only as bounded visible turns, and thinking blocks and tool
-inputs are excluded. AgentHub's Claude hooks are installed only by explicit user
-action and removed by exact executable path, leaving other settings untouched.
-
-Claude subscription usage is collected from Claude Code's own status-line
-payload and stored only as normalized quota windows. The status line also
-carries session and context details; only `rate_limits` is read, so no prompt,
-transcript path, or context content is persisted. The reporter is installed
-only by explicit user action and wraps any existing status line rather than
-replacing it. See [Claude testing](claude-testing.md).
-
-Cursor hook payloads are normalized on arrival and discarded: the raw hook JSON
-and full shell/MCP inputs are never persisted. Cursor hooks are installed only
-by explicit user action and removed by exact executable path, leaving OpenIsland
-and other hooks untouched. Subscription usage is collected only after explicit
-authorization; the access token exists in process memory during refresh and is
-never stored in SQLite, Keychain, logs, or IPC snapshots. See
-[Cursor testing](cursor-testing.md).
-
-AgentHub does not copy Codex credentials into its database. It stores normalized
-session metadata, bounded visible-turn previews, request state, handoff content,
-quota windows, and audit metadata locally. Provider errors are converted to
-generic persisted failures, and known bearer/API-token patterns are redacted
-from captured diagnostics.
-
-The daemon uses a `0700` Application Support directory, a `0600` socket and
-LaunchAgent plist, and a `0700` helper executable. Treat cached previews and
-handoff text as sensitive local data. Uninstall does not erase them; remove the
-retained AgentHub Application Support directory manually only when deliberate
-data deletion is desired.
+- Provider token literals appear only in `ClaudeQuota.swift`,
+  `CursorQuota.swift`, and `CursorLoginSessionReader.swift`, and never under
+  `App/`. A token is read for one request and never persisted.
+- Nothing invokes a package manager or `sudo`. Usage comes from the providers
+  themselves.
