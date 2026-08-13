@@ -1,5 +1,0 @@
-{"type": "summary", "summary": "compacted", "leafUuid": "x"}
-{"type": "user", "uuid": "u-1", "timestamp": "2026-08-12T10:00:00.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "keep me"}]}}
-{"type": "future-record", "uuid": "f-1", "payload": {"nested": [1, 2]}}
-not json at all
-{"type": "assistant", "uuid": "a-1", "timestamp": "2026-08-12T10:01:00.000Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "rm -rf secret"}}, {"type": "text", "text": "also keep me"}]}}

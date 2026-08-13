@@ -1,8 +1,0 @@
- [1mUpdating[0m the reducer… (esc to interrupt)
-
-⏺ Running [36mswift test[0m
-   └ 42 tests passing
-
-╭────╮
-│ >  │
-╰────╯
