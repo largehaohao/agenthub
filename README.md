@@ -47,8 +47,14 @@ On first launch it removes what older versions installed: the
 wrapper, and AgentHub's Cursor hooks. Hooks belonging to other tools are left
 alone, and both files are backed up first.
 
-Cursor usage is opt-in. Until you authorise it in Settings, AgentHub does not
-read the session token Cursor stores on this Mac.
+Two providers need a one-time approval before they report:
+
+- **Claude** reads the OAuth token Claude Code keeps in your login Keychain.
+  macOS asks you to allow that the first time, so expect a Keychain dialog;
+  choose "Always Allow" if you would rather not see it again. Until then the
+  Claude row is simply absent.
+- **Cursor** is opt-in. Until you authorise it in Settings, AgentHub does not
+  read the session token Cursor stores on this Mac.
 
 ## Credentials
 
