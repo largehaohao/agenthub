@@ -1,5 +1,5 @@
 import Foundation
-import AgentHubCore
+import AgentHubQuota
 
 /// Display-ready form of one quota window. Keeping this separate from the view
 /// lets the labelling and staleness rules be tested without SwiftUI.
