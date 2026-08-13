@@ -5,6 +5,7 @@ let package = Package(
     name: "AgentHub",
     platforms: [.macOS(.v14)],
     products: [
+        .library(name: "AgentHubQuota", targets: ["AgentHubQuota"]),
         .library(name: "AgentHubCore", targets: ["AgentHubCore"]),
         .library(name: "AgentHubPersistence", targets: ["AgentHubPersistence"]),
         .library(name: "AgentHubIPC", targets: ["AgentHubIPC"]),
@@ -28,6 +29,13 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", "2.87.0"..<"2.98.0"),
     ],
     targets: [
+        .target(
+            name: "AgentHubQuota",
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedLibrary("sqlite3"),
+            ]
+        ),
         .target(name: "AgentHubCore"),
         .target(
             name: "AgentHubPersistence",
@@ -97,6 +105,7 @@ let package = Package(
                 "AgentHubDaemon",
             ]
         ),
+        .testTarget(name: "AgentHubQuotaTests", dependencies: ["AgentHubQuota"]),
         .testTarget(
             name: "AgentHubCoreTests",
             dependencies: ["AgentHubCore", "AgentHubTestSupport"]
