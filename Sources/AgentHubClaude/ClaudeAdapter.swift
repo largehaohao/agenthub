@@ -15,7 +15,7 @@ public enum ClaudeAdapterError: Error, Equatable, Sendable {
 /// Raw hook payloads live only for the duration of `ingest`. Everything retained
 /// afterwards is normalized and display-safe, so tool inputs, prompts, and
 /// transcripts never enter AgentHub storage.
-public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderConfigurableAdapter {
+public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderConfigurableAdapter, QuotaForceRefreshing {
     public nonisolated var provider: Provider { .claude }
 
     /// Identity of one observed Claude session: the same native session ID on a
@@ -62,6 +62,9 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
     /// Claude Code's own usage cache. Pollable, unlike the status line, which
     /// only reports while a session is rendering one.
     private let usageCacheReader: ClaudeUsageCacheReader?
+    /// Anthropic's usage endpoint: the authoritative source, and the only one
+    /// that reports current windows with no Claude Code session running.
+    private let usageCache: ClaudeUsageCache?
     private let executor = ClaudeManagedRequestExecutor()
     private let makeSessionID: @Sendable () -> UUID
     private let launchTimeout: Duration
@@ -88,6 +91,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         hookInstaller: ClaudeHookInstaller? = nil,
         statusLineInstaller: ClaudeStatusLineInstaller? = nil,
         usageCacheReader: ClaudeUsageCacheReader? = nil,
+        usageCache: ClaudeUsageCache? = nil,
         makeSessionID: @escaping @Sendable () -> UUID = { UUID() },
         launchTimeout: Duration = .seconds(30),
         now: @escaping @Sendable () -> Date = { Date() }
@@ -100,6 +104,7 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         self.hookInstaller = hookInstaller
         self.statusLineInstaller = statusLineInstaller
         self.usageCacheReader = usageCacheReader
+        self.usageCache = usageCache
         self.makeSessionID = makeSessionID
         self.launchTimeout = launchTimeout
         self.now = now
@@ -427,24 +432,31 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
         try await terminal.submit(paneID: runtime.paneID)
     }
 
+    /// Bypasses the usage-API rate limit for an explicit user refresh.
+    public func forceQuotaRefresh() async {
+        _ = await usageCache?.windows(force: true)
+    }
+
     public func reconcile() async throws -> AdapterSnapshot {
-        AdapterSnapshot(
+        let apiWindows = await usageCache?.windows() ?? []
+        return AdapterSnapshot(
             sessions: sessions.values.map(session(from:)),
             nodes: Array(nodes.values),
             requests: requests.values.map(pendingRequest(from:)),
-            quotas: mergedQuotas(),
+            quotas: mergedQuotas(apiWindows: apiWindows),
             endpoints: [],
             requestsAreAuthoritative: true
         )
     }
 
-    /// Combines status-line readings with Claude Code's usage cache.
+    /// Combines the three usage sources, keyed by window id.
     ///
-    /// Both describe the same windows, so they are keyed by window id and the
-    /// newer observation wins — a fresh status line is not overwritten by an
-    /// older cached number, and a cache refreshed while no session was running
-    /// supersedes a status line from hours ago.
-    private func mergedQuotas() -> [QuotaWindow] {
+    /// Anthropic's endpoint is authoritative and always wins: it reports the
+    /// account's live windows regardless of whether a session is running. The
+    /// status line and Claude Code's local cache remain as fallbacks for when
+    /// the endpoint is unreachable or the account is signed out, and between
+    /// those two the newer observation wins.
+    private func mergedQuotas(apiWindows: [QuotaWindow]) -> [QuotaWindow] {
         var byID: [String: QuotaWindow] = [:]
         for window in quotas {
             byID[window.id] = window
@@ -453,6 +465,9 @@ public actor ClaudeAdapter: AgentAdapter, HookEventIngestingAdapter, ProviderCon
             if let existing = byID[window.id], existing.fetchedAt >= window.fetchedAt {
                 continue
             }
+            byID[window.id] = window
+        }
+        for window in apiWindows {
             byID[window.id] = window
         }
         return byID.values.sorted { $0.windowDuration < $1.windowDuration }

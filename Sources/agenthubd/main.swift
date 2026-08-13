@@ -200,8 +200,15 @@ private func runDaemon(paths: DaemonPaths) async throws {
         terminal: resolvedClaudeTerminal(),
         hookInstaller: resolvedClaudeHookInstaller(),
         statusLineInstaller: resolvedClaudeStatusLineInstaller(),
-        // Pollable usage source, so quota refreshes without an active session.
-        usageCacheReader: ClaudeUsageCacheReader.standard()
+        // Fallback usage sources, used only when the endpoint below is
+        // unreachable or the account is signed out.
+        usageCacheReader: ClaudeUsageCacheReader.standard(),
+        // Authoritative usage, rate-limited so reconcile does not call
+        // api.anthropic.com continuously.
+        usageCache: {
+            let client = ClaudeUsageAPIClient()
+            return ClaudeUsageCache { await client.fetch() }
+        }()
     )
     let cursorQuotaAuth = CursorQuotaAuthStore()
     let cursorQuotaCollector = CursorQuotaCollector(

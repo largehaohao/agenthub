@@ -89,14 +89,16 @@ if rg -n '\.cursor/hooks\.json|root\["hooks"\]' Sources/AgentHubCursor App Sourc
   exit 1
 fi
 
-# Cursor access tokens stay in process memory only.
+# Provider access tokens stay in process memory only. Each reader below holds a
+# token just long enough to build one request header; none may be persisted.
 if rg -n 'accessToken|WorkosCursorSessionToken' Sources \
   | rg -v '^Sources/AgentHubCursor/CursorLoginSessionReader\.swift:' \
-  | rg -v '^Sources/AgentHubCursor/CursorQuotaClient\.swift:' >/dev/null; then
-  print -u2 -- "Cursor token literals are confined to the login reader and quota client"
+  | rg -v '^Sources/AgentHubCursor/CursorQuotaClient\.swift:' \
+  | rg -v '^Sources/AgentHubClaude/ClaudeUsageAPI\.swift:' >/dev/null; then
+  print -u2 -- "Provider token literals are confined to their reader and quota client"
   exit 1
 fi
 if rg -n 'accessToken|WorkosCursorSessionToken' App >/dev/null; then
-  print -u2 -- "Cursor token literals must not appear in App persistence paths"
+  print -u2 -- "Provider token literals must not appear in App persistence paths"
   exit 1
 fi
