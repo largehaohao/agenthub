@@ -13,16 +13,20 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   test
 
-# A provider token is read for one request and never persisted. These are the
-# only files permitted to name one.
-if rg -n 'accessToken|WorkosCursorSessionToken' Sources \
+# A provider token is read for one request and never persisted by AgentHub.
+# Claude's is the one exception: it is renewed in place inside Claude Code's own
+# Keychain item, which ClaudeTokenRefresh.swift owns. These are the only files
+# permitted to name a token.
+token_names='accessToken|refreshToken|WorkosCursorSessionToken'
+if rg -n "$token_names" Sources \
   | rg -v '^Sources/AgentHubQuota/ClaudeQuota\.swift:' \
+  | rg -v '^Sources/AgentHubQuota/ClaudeTokenRefresh\.swift:' \
   | rg -v '^Sources/AgentHubQuota/CursorLoginSessionReader\.swift:' \
   | rg -v '^Sources/AgentHubQuota/CursorQuota\.swift:' >/dev/null; then
   print -u2 -- "Provider token literals are confined to their readers"
   exit 1
 fi
-if rg -n 'accessToken|WorkosCursorSessionToken' App >/dev/null; then
+if rg -n "$token_names" App >/dev/null; then
   print -u2 -- "Provider token literals must not appear in the app"
   exit 1
 fi

@@ -77,65 +77,6 @@ public enum ClaudeUsageWindows {
     }
 }
 
-/// Claude Code's OAuth credential, read from the login Keychain.
-///
-/// Held in memory for the lifetime of one request. AgentHub never writes it to
-/// SQLite, its own Keychain service, a log, or an IPC message, matching the rule
-/// already applied to Cursor tokens.
-public struct ClaudeOAuthCredential: Sendable {
-    public let token: String
-    public let expiresAt: Date?
-
-    init?(json data: Data) {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = root["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String,
-              !token.isEmpty else {
-            return nil
-        }
-        self.token = token
-        self.expiresAt = (oauth["expiresAt"] as? Double).map {
-            Date(timeIntervalSince1970: $0 / 1_000)
-        }
-    }
-
-    /// Claude Code refreshes the token in place, so an expired one means Claude
-    /// Code has not run recently. Usage is then skipped rather than refreshed
-    /// here, which would risk invalidating Claude Code's own session.
-    public func isExpired(now: Date = Date()) -> Bool {
-        guard let expiresAt else { return false }
-        return expiresAt <= now
-    }
-}
-
-/// Reads Claude Code's OAuth credential from the login Keychain.
-public struct ClaudeOAuthCredentialReader: Sendable {
-    public static let defaultService = "Claude Code-credentials"
-
-    private let service: String
-
-    public init(service: String = ClaudeOAuthCredentialReader.defaultService) {
-        self.service = service
-    }
-
-    /// Returns nil when Claude Code is not signed in, or when the daemon is not
-    /// permitted to read the item.
-    public func read() -> ClaudeOAuthCredential? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else {
-            return nil
-        }
-        return ClaudeOAuthCredential(json: data)
-    }
-}
-
 /// Fetches Claude usage from Anthropic directly.
 ///
 /// This is the authoritative source: it reports the account's current windows
@@ -147,85 +88,82 @@ public struct ClaudeUsageAPIClient: Sendable {
     public static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
     private let session: URLSession
-    private let credentials: ClaudeOAuthCredentialReader
+    private let refresher: ClaudeTokenRefresher
     private let accountID: String
     private let now: @Sendable () -> Date
 
     public init(
         session: URLSession = .shared,
-        credentials: ClaudeOAuthCredentialReader = ClaudeOAuthCredentialReader(),
+        refresher: ClaudeTokenRefresher = ClaudeTokenRefresher(),
         accountID: String = "default",
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.session = session
-        self.credentials = credentials
+        self.refresher = refresher
         self.accountID = accountID
         self.now = now
     }
 
-    /// Returns no windows when signed out, when the token has expired, or when
-    /// the call fails, so a network problem degrades this one source rather than
-    /// the Claude adapter.
+    /// Returns no windows when signed out or when the call fails, so a network
+    /// problem degrades this one source rather than the Claude adapter.
+    ///
+    /// An expired token is renewed rather than skipped: Claude Code's tokens
+    /// last eight hours, so skipping meant Claude usage was missing for most of
+    /// every day.
     public func fetch() async -> [QuotaWindow] {
-        guard let credential = credentials.read(), !credential.isExpired(now: now()) else {
+        guard let token = await refresher.token() else { return [] }
+
+        switch await request(token: token) {
+        case .success(let data):
+            return decode(data)
+        case .unauthorized:
+            // The stored token was rejected even though it had not expired by
+            // the clock — revoked, or rotated behind our back. One forced
+            // refresh distinguishes that from a signed-out account.
+            guard let renewed = await refresher.token(force: true),
+                  case .success(let data) = await request(token: renewed) else {
+                return []
+            }
+            return decode(data)
+        case .failed:
             return []
         }
+    }
 
+    /// Why Claude has no numbers, when it has none.
+    public func notice() async -> String? {
+        await refresher.diagnosis().panelMessage
+    }
+
+    private enum Outcome {
+        case success(Data)
+        case unauthorized
+        case failed
+    }
+
+    private func request(token: String) async -> Outcome {
         var request = URLRequest(url: Self.endpoint)
         request.timeoutInterval = 10
-        request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
         guard let (data, response) = try? await session.data(for: request),
-              let http = response as? HTTPURLResponse,
-              http.statusCode == 200 else {
-            return []
+              let http = response as? HTTPURLResponse else {
+            return .failed
         }
-        return (try? ClaudeUsageWindows.decode(
+        switch http.statusCode {
+        case 200: return .success(data)
+        case 401, 403: return .unauthorized
+        default: return .failed
+        }
+    }
+
+    private func decode(_ data: Data) -> [QuotaWindow] {
+        (try? ClaudeUsageWindows.decode(
             data,
             accountID: accountID,
             fetchedAt: now(),
             source: Self.source
         )) ?? []
-    }
-}
-
-/// Rate-limits calls to the usage API.
-///
-/// `reconcile()` runs on every hook delivery and session change, while
-/// subscription usage moves slowly. A failed refresh keeps the previous reading
-/// rather than blanking the strip.
-public actor ClaudeUsageCache {
-    public static let defaultInterval: TimeInterval = 900
-
-    private let minimumInterval: TimeInterval
-    private let now: @Sendable () -> Date
-    private let fetch: @Sendable () async -> [QuotaWindow]
-
-    private var cached: [QuotaWindow] = []
-    private var lastAttempt: Date?
-
-    public init(
-        minimumInterval: TimeInterval = ClaudeUsageCache.defaultInterval,
-        now: @escaping @Sendable () -> Date = { Date() },
-        fetch: @escaping @Sendable () async -> [QuotaWindow]
-    ) {
-        self.minimumInterval = minimumInterval
-        self.now = now
-        self.fetch = fetch
-    }
-
-    /// - Parameter force: bypasses the interval for an explicit user refresh.
-    public func windows(force: Bool = false) async -> [QuotaWindow] {
-        if !force, let lastAttempt,
-           now().timeIntervalSince(lastAttempt) < minimumInterval {
-            return cached
-        }
-        lastAttempt = now()
-        let fetched = await fetch()
-        if !fetched.isEmpty {
-            cached = fetched
-        }
-        return cached
     }
 }

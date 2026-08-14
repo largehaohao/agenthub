@@ -74,33 +74,6 @@ final class ClaudeUsageAPITests: XCTestCase {
         XCTAssertTrue(windows.allSatisfy { $0.resetsAt > Date(timeIntervalSince1970: 1_786_000_000) })
     }
 
-    // MARK: - Credential handling
-
-    func testCredentialParsesTokenAndExpiry() throws {
-        let payload = """
-        {"claudeAiOauth":{"accessToken":"tok-123","refreshToken":"r",
-        "expiresAt":1786631766712,"subscriptionType":"pro"}}
-        """
-
-        let credential = try XCTUnwrap(
-            ClaudeOAuthCredential(json: Data(payload.utf8))
-        )
-
-        XCTAssertEqual(credential.token, "tok-123")
-        XCTAssertEqual(
-            try XCTUnwrap(credential.expiresAt).timeIntervalSince1970,
-            1_786_631_766.712,
-            accuracy: 0.01
-        )
-        XCTAssertFalse(credential.isExpired(now: Date(timeIntervalSince1970: 1_786_000_000)))
-        XCTAssertTrue(credential.isExpired(now: Date(timeIntervalSince1970: 1_800_000_000)))
-    }
-
-    func testMalformedCredentialIsRejected() throws {
-        XCTAssertNil(ClaudeOAuthCredential(json: Data("{}".utf8)))
-        XCTAssertNil(ClaudeOAuthCredential(json: Data("not json".utf8)))
-    }
-
     /// The token is held only to build one request header; it must never reach
     /// a quota window that gets persisted.
     func testDecodedWindowsCarryNoCredential() throws {

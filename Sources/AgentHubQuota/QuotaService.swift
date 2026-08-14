@@ -4,10 +4,19 @@ import Foundation
 public struct QuotaSource: Sendable {
     public let provider: Provider
     public let fetch: @Sendable () async -> [QuotaWindow]
+    /// Why this provider has nothing to report, asked only when it reports
+    /// nothing. A silent gap looks like a bug; the reason is usually a sign-in
+    /// the user can fix.
+    public let notice: @Sendable () async -> String?
 
-    public init(provider: Provider, fetch: @escaping @Sendable () async -> [QuotaWindow]) {
+    public init(
+        provider: Provider,
+        fetch: @escaping @Sendable () async -> [QuotaWindow],
+        notice: @escaping @Sendable () async -> String? = { nil }
+    ) {
         self.provider = provider
         self.fetch = fetch
+        self.notice = notice
     }
 }
 
@@ -21,13 +30,23 @@ public actor QuotaService {
     /// Quota windows are only considered stale after fifteen minutes, so
     /// refreshing faster than that buys nothing and costs four API calls.
     public static let defaultInterval: TimeInterval = 900
+    /// How soon a provider that has reported nothing is tried again.
+    ///
+    /// The long interval protects readings we already have; a provider with no
+    /// reading has nothing to protect, and its first number is the one the user
+    /// is waiting for. Cursor in particular fetches on its own schedule, so its
+    /// first result routinely lands just after the panel's first refresh.
+    public static let emptyRetryInterval: TimeInterval = 60
 
     private let sources: [QuotaSource]
     private let minimumInterval: TimeInterval
     private let now: @Sendable () -> Date
 
     private var cached: [Provider: [QuotaWindow]] = [:]
-    private var lastAttempt: Date?
+    private var notices: [Provider: String] = [:]
+    /// Tracked per provider: one slow or failing source must not hold the
+    /// others to its schedule.
+    private var lastAttempt: [Provider: Date] = [:]
 
     public init(
         sources: [QuotaSource],
@@ -42,23 +61,42 @@ public actor QuotaService {
     /// - Parameter force: bypasses the interval for an explicit user refresh,
     ///   so the refresh button is never a no-op.
     public func windows(force: Bool = false) async -> [QuotaWindow] {
-        if !force, let lastAttempt,
-           now().timeIntervalSince(lastAttempt) < minimumInterval {
-            return flattened()
-        }
-        lastAttempt = now()
+        let now = self.now()
+        let due = sources.filter { force || isDue($0.provider, now: now) }
+        guard !due.isEmpty else { return flattened() }
+        for source in due { lastAttempt[source.provider] = now }
 
         // Providers are fetched together; one slow source should not serialise
         // behind another.
-        await withTaskGroup(of: (Provider, [QuotaWindow]).self) { group in
-            for source in sources {
-                group.addTask { (source.provider, await source.fetch()) }
+        await withTaskGroup(of: (Provider, [QuotaWindow], String?).self) { group in
+            for source in due {
+                group.addTask {
+                    let fetched = await source.fetch()
+                    // Only a provider with nothing to show owes an explanation.
+                    return (source.provider, fetched, fetched.isEmpty ? await source.notice() : nil)
+                }
             }
-            for await (provider, fetched) in group where !fetched.isEmpty {
-                cached[provider] = fetched
+            for await (provider, fetched, notice) in group {
+                if !fetched.isEmpty { cached[provider] = fetched }
+                notices[provider] = notice
             }
         }
         return flattened()
+    }
+
+    /// Explanations gathered by the last refresh, keyed by provider.
+    public func currentNotices() -> [Provider: String] {
+        // A provider holding a previous reading is showing numbers, so any
+        // explanation would contradict what is on screen.
+        notices.filter { cached[$0.key]?.isEmpty ?? true }
+    }
+
+    private func isDue(_ provider: Provider, now: Date) -> Bool {
+        guard let last = lastAttempt[provider] else { return true }
+        let interval = (cached[provider]?.isEmpty ?? true)
+            ? Self.emptyRetryInterval
+            : minimumInterval
+        return now.timeIntervalSince(last) >= interval
     }
 
     private func flattened() -> [QuotaWindow] {
@@ -72,11 +110,27 @@ public actor QuotaService {
         let cursor = CursorQuotaCollector.live()
         let openCode = OpenCodeGoQuotaClient()
         return QuotaService(sources: [
-            .init(provider: .claude) { await claude.fetch() },
-            .init(provider: .codex) { await codex.fetch() },
+            .init(
+                provider: .claude,
+                fetch: { await claude.fetch() },
+                notice: { await claude.notice() }
+            ),
+            .init(provider: .codex, fetch: { await codex.fetch() }),
             // Cursor polls itself once authorised; this reads what it holds.
-            .init(provider: .cursor) { await cursor.currentWindows() },
-            .init(provider: .openCode) { await openCode.fetch() },
+            .init(
+                provider: .cursor,
+                fetch: { await cursor.currentWindows() },
+                notice: {
+                    guard await cursor.isAuthorized else {
+                        return "Cursor usage is off — turn it on in Settings"
+                    }
+                    // Cursor polls on its own schedule, so the first reading can
+                    // arrive after the panel's. Saying so beats a blank gap that
+                    // looks like a failure.
+                    return await cursor.lastErrorMessage ?? "Cursor usage has not arrived yet"
+                }
+            ),
+            .init(provider: .openCode, fetch: { await openCode.fetch() }),
         ])
     }
 }

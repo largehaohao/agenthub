@@ -30,22 +30,20 @@ final class LiveQuotaTests: XCTestCase {
             print("  \(provider.displayName): \(rows.isEmpty ? "none" : summary)")
         }
 
-        // Two providers are conditional and must not fail this test:
-        //
-        //  - Claude needs the login Keychain, and reading another app's item
-        //    raises an approval dialog the first time. A non-interactive test
-        //    process cannot show one, so it gets errSecInteractionNotAllowed.
-        //  - Cursor stays silent until it is authorised in Settings.
-        //
-        // OpenCode and Codex read a file and a subprocess, so they should
-        // always report.
+        // Only Cursor is conditional: it stays silent until authorised in
+        // Settings. The rest read a file or a subprocess and should always
+        // report on a signed-in Mac.
         XCTAssertFalse(
             (byProvider[.openCode] ?? []).isEmpty,
             "OpenCode usage should be readable from the CLI's auth.json"
         )
-        if (byProvider[.claude] ?? []).isEmpty {
-            print("  (Claude absent: the Keychain item needs interactive approval)")
-        }
+        XCTAssertFalse(
+            (byProvider[.claude] ?? []).isEmpty,
+            """
+            Claude usage should be readable from the credential Claude Code \
+            keeps current, renewing it first if it has expired
+            """
+        )
     }
 
     /// The percentages must be usable numbers, not placeholders.

@@ -84,6 +84,60 @@ final class QuotaServiceTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    /// A provider that has reported nothing is retried far sooner than one
+    /// holding a reading: the long interval protects numbers we already have,
+    /// and an empty provider has none.
+    func testEmptyProviderIsRetriedSoonerThanAReportingOne() async throws {
+        let clock = Clock(Date(timeIntervalSince1970: 1_000))
+        let empty = Counter()
+        let reporting = Counter()
+        let codex = try window(.codex, 20, at: clock.now)
+        let service = QuotaService(
+            sources: [
+                .init(provider: .claude) {
+                    await empty.increment()
+                    return []
+                },
+                .init(provider: .codex) {
+                    await reporting.increment()
+                    return [codex]
+                },
+            ],
+            minimumInterval: 900,
+            now: { clock.now }
+        )
+
+        _ = await service.windows()
+        clock.advance(by: QuotaService.emptyRetryInterval + 1)
+        _ = await service.windows()
+
+        let emptyCalls = await empty.count
+        let reportingCalls = await reporting.count
+        XCTAssertEqual(emptyCalls, 2, "the provider with nothing should be tried again")
+        XCTAssertEqual(reportingCalls, 1, "the provider with a reading should wait out the interval")
+    }
+
+    /// The short retry is still a limit, not an invitation to poll on every
+    /// panel open.
+    func testEmptyProviderIsNotRetriedImmediately() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let counter = Counter()
+        let service = QuotaService(
+            sources: [.init(provider: .claude) {
+                await counter.increment()
+                return []
+            }],
+            minimumInterval: 900,
+            now: { now }
+        )
+
+        _ = await service.windows()
+        _ = await service.windows()
+
+        let calls = await counter.count
+        XCTAssertEqual(calls, 1)
+    }
+
     /// A transient failure must leave the last real numbers on screen rather
     /// than blanking the panel.
     func testFailedRefreshKeepsPreviousWindows() async throws {
@@ -103,6 +157,21 @@ final class QuotaServiceTests: XCTestCase {
         let after = await service.windows()
 
         XCTAssertEqual(after.map(\.usedPercent), [10])
+    }
+}
+
+/// A movable clock, so the interval can be crossed without sleeping.
+private final class Clock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date
+    init(_ date: Date) { self.date = date }
+    var now: Date {
+        lock.lock(); defer { lock.unlock() }
+        return date
+    }
+    func advance(by interval: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        date.addTimeInterval(interval)
     }
 }
 
