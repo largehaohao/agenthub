@@ -1,9 +1,0 @@
-{
-  "hook_event_name": "stop",
-  "conversation_id": "conv-fixture-1",
-  "generation_id": "gen-5",
-  "session_id": "conv-fixture-1",
-  "workspace_roots": ["/Users/example/repo"],
-  "status": "completed",
-  "loop_count": 0
-}

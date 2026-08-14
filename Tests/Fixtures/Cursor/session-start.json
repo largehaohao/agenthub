@@ -1,9 +1,0 @@
-{
-  "hook_event_name": "sessionStart",
-  "conversation_id": "conv-fixture-1",
-  "generation_id": "gen-1",
-  "session_id": "conv-fixture-1",
-  "workspace_roots": ["/Users/example/repo"],
-  "cursor_version": "1.0.0",
-  "transcript_path": "/Users/example/.cursor/projects/repo/agent-transcripts/conv-fixture-1.jsonl"
-}

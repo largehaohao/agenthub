@@ -1,88 +1,77 @@
 # AgentHub
 
-AgentHub is a native macOS control center for coding-agent sessions. It uses a
-user-scoped background daemon and a local Unix socket, so session state and
-requests remain available when the window is closed.
+AgentHub is a macOS menu bar panel that shows how much of your coding-agent
+subscriptions you have used.
 
-The current desktop slice supports Codex, OpenCode, Claude, and Cursor end to end:
+It reads usage for four providers and shows them in one place:
 
-- discover and launch Codex sessions, including visible subagents;
-- show session status, pending approval/input requests, and quota windows;
-- resolve Codex requests and jump to a session detail;
-- deliver a bounded, attributed handoff between managed sessions;
-- persist normalized state in a local SQLite database and reconnect after restart.
-- discover OpenCode Desktop and terminal servers, or attach a loopback server manually;
-- launch managed OpenCode sessions and merge duplicate native sessions across surfaces;
-- handle OpenCode permissions, ordered questions, native jumps, and cross-provider handoffs;
-- store OpenCode passwords in Keychain while sending only opaque references over IPC.
-- observe Claude Code CLI and Claude Desktop sessions through user-scoped hooks
-  you install explicitly;
-- launch managed Claude sessions as a visible tmux-backed iTerm terminal, with
-  the initial prompt delivered through a paste buffer rather than process
-  arguments;
-- surface Claude permissions, questions, subagents, and background tasks, and
-  answer them only after revalidating the exact live prompt;
-- show Claude subscription usage collected from Claude Code itself.
-- observe Cursor IDE Agent Chat sessions through user-level hooks you install
-  explicitly;
-- surface Cursor tool permissions, answer them only after revalidating the live
-  prompt, and jump to the recorded workspace;
-- show Cursor subscription usage after you authorize reading the local login
-  session (the token is never stored in AgentHub's database).
+| Provider | Windows | Source |
+|---|---|---|
+| Claude | 5h, 7d | Anthropic's usage endpoint, via the OAuth token Claude Code stores |
+| Codex | 5h, 7d | a short-lived `codex app-server` |
+| Cursor | billing cycle, split API / Auto / Total | `cursor.com` usage summary, after you authorise it |
+| OpenCode | 5h, 7d, 30d | `opencode.ai` Go usage, via the key the CLI stores |
 
-Claude usage comes from Claude Code's own status line, which reports real
-five-hour and weekly limits. Press **Install Usage Reporter** in Claude Settings
-to add AgentHub's reporter; it wraps any status line you already have rather
-than replacing it, and removing it restores yours exactly. No third-party app or
-package installation is involved. Without the reporter, Claude sessions,
-requests, jumps, and handoffs all work normally and only the usage strip is
-empty. Usage older than 15 minutes stays visible but is marked stale and is
-excluded from pacing recommendations.
+Hover the menu bar icon to see them, click to pin the panel, or press ⇧⌘T from
+anywhere — the shortcut is rebindable in Settings. Usage refreshes every fifteen
+minutes, and the pinned panel has a refresh button. The `−` and `+` buttons zoom
+the whole panel, from 80% to 250%, and the size is remembered.
 
-Cursor sessions are discovered through hooks only; there is no managed launch.
-Handoffs to Cursor are clipboard-and-jump. Usage requires explicit
-authorization and reads the local Cursor login session into process memory only.
+A provider that reports nothing says why instead of leaving a gap.
 
-OpenCode Go does not expose a supported quota source yet, so AgentHub displays
-that limitation explicitly instead of estimating a balance. Claude Desktop does
-not expose a session identifier through Accessibility, so Desktop rows activate
-Claude rather than answering a window AgentHub cannot verify.
+## What it does not do
 
-## Requirements
+AgentHub used to manage agent sessions — listing them, approving permission
+requests, handing context between agents. That is gone. Only Cursor exposed live
+desktop sessions; Claude Desktop cannot be observed at all, and Codex Desktop
+threads are not reachable from an app server we can start. The reasoning is in
+`docs/superpowers/specs/2026-08-13-agenthub-quota-menubar-design.md`.
 
-- macOS 14 or newer
-- Xcode 16 or newer with Swift 6
-- XcodeGen 2.45.4 or newer
-- a logged-in `codex` CLI available on `PATH`
-- OpenCode 1.18.x on `PATH` for OpenCode discovery or managed launch
-- Claude Code 2.1.x, plus `tmux` and iTerm for managed Claude sessions
-
-## Build and verify
+## Build
 
 ```bash
-./scripts/check.sh
+xcodegen generate
+xcodebuild -project AgentHub.xcodeproj -scheme AgentHubApp \
+  -configuration Debug -destination 'platform=macOS' \
+  -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build
+open .build/xcode/Build/Products/Debug/AgentHubApp.app
 ```
 
-The ordinary test gate uses scripted Codex transport. The test that creates a
-real Codex thread is opt-in and remains skipped by default.
+`zsh scripts/check.sh` runs the whole gate: package tests, the app test bundle,
+and the source rules below.
 
-The OpenCode live compatibility test performs only isolated session CRUD and
-process-owned socket discovery; it never sends a model prompt. See
-[OpenCode testing](docs/opencode-testing.md) for the opt-in command and privacy
-boundaries.
+## Running it
 
-Claude tests use fixtures only: they never submit a prompt, read real
-transcripts, or modify your Claude settings. See
-[Claude testing](docs/claude-testing.md) for the opt-in flags and the hook
-install/uninstall behavior.
+AgentHub has no Dock icon and no window — it lives in the menu bar. Nothing
+starts it for you, so **add it to Login Items** if you want it always there.
 
-Cursor tests use fixtures only: they never read real Cursor auth, call live
-usage APIs, or modify your `~/.cursor/hooks.json`. See
-[Cursor testing](docs/cursor-testing.md) for boundaries and authorization
-behavior.
+On first launch it removes what older versions installed: the
+`com.agenthub.daemon` LaunchAgent, AgentHub's Claude hooks and status-line
+wrapper, and AgentHub's Cursor hooks. Hooks belonging to other tools are left
+alone, and both files are backed up first.
 
-For build, launch, installation, service inspection, fixture mode, live testing,
-privacy, and uninstall commands, see [Development and operations](docs/development.md).
+**Cursor** is opt-in: until you authorise it in Settings, AgentHub does not read
+the session token Cursor stores on this Mac.
 
-The approved product design and implementation plans are under
-[`docs/superpowers/`](docs/superpowers/).
+**Claude** works as long as Claude Code is signed in. Claude Code keeps its
+credential in `~/.claude/.credentials.json` or in the login Keychain, and a Mac
+can hold both — one of them a dead leftover from an older sign-in — so AgentHub
+reads whichever has the later expiry rather than preferring either.
+
+Claude's access token lasts eight hours and Claude Code only renews it when it
+makes a request, so a Mac that has not run it since this morning holds an expired
+one. AgentHub then performs the same refresh Claude Code performs and writes the
+result back to the same store, so a rotated refresh token does not log the CLI
+out. This is the one credential AgentHub writes, and it writes it only where
+Claude Code already keeps it. If the refresh token is itself dead, the panel says
+so and `claude auth login` is the fix.
+
+## Credentials
+
+Every provider token is read at the moment of the request, kept in memory for
+that request, and never written to disk, a log, or the panel. `scripts/check.sh`
+enforces this: token literals may appear only in the three reader files that
+need them, and never in the app.
+
+AgentHub never installs software or shells out to a package manager to obtain
+usage.

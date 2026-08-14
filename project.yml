@@ -16,48 +16,15 @@ targets:
     platform: macOS
     sources:
       - App
-      - path: Support/com.agenthub.daemon.plist
-        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.agenthub.app
         CODE_SIGN_ENTITLEMENTS: Config/AgentHubApp.entitlements
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
     dependencies:
       - package: AgentHubPackage
-        product: AgentHubCore
-      - package: AgentHubPackage
-        product: AgentHubIPC
-      - package: AgentHubPackage
-        product: AgentHubSecurity
-    postBuildScripts:
-      - name: Embed helpers
-        script: |
-          set -euo pipefail
-          if [[ "$CONFIGURATION" == "Release" ]]; then
-            SWIFT_CONFIGURATION="release"
-          else
-            SWIFT_CONFIGURATION="debug"
-          fi
-          for PRODUCT in agenthubd agenthub-claude-hook agenthub-claude-statusline agenthub-cursor-hook; do
-            xcrun swift build \
-              --package-path "$SRCROOT" \
-              --product "$PRODUCT" \
-              --configuration "$SWIFT_CONFIGURATION"
-          done
-          HELPER_DIR="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers"
-          mkdir -p "$HELPER_DIR"
-          for PRODUCT in agenthubd agenthub-claude-hook agenthub-claude-statusline agenthub-cursor-hook; do
-            install -m 700 \
-              "$SRCROOT/.build/$SWIFT_CONFIGURATION/$PRODUCT" \
-              "$HELPER_DIR/$PRODUCT"
-          done
-        outputFiles:
-          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthubd
-          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-claude-hook
-          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-claude-statusline
-          - $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/agenthub-cursor-hook
-        basedOnDependencyAnalysis: false
+        product: AgentHubQuota
   AgentHubAppTests:
     type: bundle.unit-test
     platform: macOS
@@ -66,11 +33,7 @@ targets:
     dependencies:
       - target: AgentHubApp
       - package: AgentHubPackage
-        product: AgentHubCore
-      - package: AgentHubPackage
-        product: AgentHubIPC
-      - package: AgentHubPackage
-        product: AgentHubSecurity
+        product: AgentHubQuota
 schemes:
   AgentHubApp:
     build:

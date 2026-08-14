@@ -1,8 +1,0 @@
-⏺ AskUserQuestion
-
-╭───────────╮
-│ Which environment?    │
-│                       │
-│ [7m❯ 1. Staging[0m         │
-│   2. Production       │
-╰───────────╯
