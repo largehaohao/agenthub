@@ -27,10 +27,7 @@ final class MenuBarController: NSObject {
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(
-            systemSymbolName: "gauge.with.dots.needle.33percent",
-            accessibilityDescription: "AgentHub usage"
-        )
+        item.button?.image = Self.menuBarImage()
         item.button?.target = self
         item.button?.action = #selector(statusItemClicked)
         statusItem = item
@@ -49,6 +46,19 @@ final class MenuBarController: NSObject {
         hover.onVisibilityChange = { [weak self] visible in
             visible ? self?.showPanel() : self?.hidePanel()
         }
+    }
+
+    private static func menuBarImage() -> NSImage {
+        if let image = NSImage(named: "MenuBarQ") {
+            image.isTemplate = true
+            image.accessibilityDescription = "AgentHub usage"
+            return image
+        }
+
+        return NSImage(
+            systemSymbolName: "gauge.with.dots.needle.33percent",
+            accessibilityDescription: "AgentHub usage"
+        )!
     }
 
     /// Shows the panel pinned, for the global shortcut.
