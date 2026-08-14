@@ -150,6 +150,9 @@ public actor ClaudeTokenRefresher {
     private let store: ClaudeCredentialStore
     private let post: ClaudeTokenPost
     private let now: @Sendable () -> Date
+    /// The endpoint refused the grant itself. Distinguished from a network
+    /// failure, which is worth retrying and says nothing about the credential.
+    private var refreshRejected = false
 
     public init(
         store: ClaudeCredentialStore = ClaudeCredentialStores.standard,
@@ -185,7 +188,10 @@ public actor ClaudeTokenRefresher {
     public func diagnosis() -> ClaudeCredentialState {
         guard let blob = load() else { return .noCredential }
         guard blob.accessToken != nil else { return .noCredential }
+        // A current token supersedes any earlier rejection: signing in again
+        // writes a fresh credential here.
         if !blob.expiresSoon(now: now()) { return .valid }
+        if refreshRejected { return .refreshRejected }
         return blob.refreshToken == nil ? .expiredWithoutRefresh : .refreshable
     }
 
@@ -200,11 +206,17 @@ public actor ClaudeTokenRefresher {
             "client_id": Self.clientID,
         ]
         guard let body = try? JSONSerialization.data(withJSONObject: request),
-              let reply = await post(body),
-              reply.status == 200,
-              let renewed = ClaudeRenewedToken(data: reply.body) else {
+              let reply = await post(body) else {
             return nil
         }
+        guard reply.status == 200, let renewed = ClaudeRenewedToken(data: reply.body) else {
+            // 4xx is the grant being refused — retrying cannot fix it, and the
+            // panel should say so rather than keep showing nothing. A 5xx or a
+            // transport failure says nothing about the credential.
+            if (400..<500).contains(reply.status) { refreshRejected = true }
+            return nil
+        }
+        refreshRejected = false
 
         // Re-read before writing: Claude Code may have refreshed in the moment
         // this request was in flight, and overwriting its newer token with ours
@@ -236,21 +248,29 @@ public actor ClaudeTokenRefresher {
 
 /// Why Claude usage is or is not available, in the user's terms.
 public enum ClaudeCredentialState: Equatable, Sendable {
-    /// Claude Code is not signed in on this Mac, or its Keychain item is
-    /// unreadable.
+    /// Claude Code is not signed in on this Mac, or its store is unreadable.
     case noCredential
     /// The stored token is current.
     case valid
-    /// Expired, but a refresh token is on hand.
+    /// Expired, with a refresh token that has not been refused.
     case refreshable
     /// Expired with nothing to renew from.
     case expiredWithoutRefresh
+    /// The refresh token was rejected outright, so no amount of retrying will
+    /// help. Signing in again is the only fix.
+    case refreshRejected
 
-    public var panelMessage: String? {
+    /// Why there are no numbers. Never nil: this is only ever consulted when
+    /// Claude reported nothing, and "nothing, unexplained" is the state that
+    /// made the same gap look like a bug twice.
+    public var panelMessage: String {
         switch self {
-        case .valid, .refreshable: nil
-        case .noCredential: "Claude Code is not signed in on this Mac"
-        case .expiredWithoutRefresh: "Claude sign-in expired — run claude auth login"
+        case .noCredential:
+            "Claude Code is not signed in on this Mac"
+        case .expiredWithoutRefresh, .refreshRejected:
+            "Claude sign-in expired — run `claude` to sign in again"
+        case .valid, .refreshable:
+            "Claude usage is temporarily unavailable"
         }
     }
 }

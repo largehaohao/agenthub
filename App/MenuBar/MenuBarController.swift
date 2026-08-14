@@ -175,7 +175,13 @@ final class MenuBarController: NSObject {
     private func makePanel() -> NSPanel {
         let view = QuotaPanelView(
             model: model,
-            onOpenSettings: onOpenSettings,
+            // The panel floats at status-bar level, so it covers the settings
+            // window it just opened. Standing aside is the whole intent of the
+            // click anyway.
+            onOpenSettings: { [weak self] in
+                self?.hover.unpin()
+                self?.onOpenSettings()
+            },
             onClose: { [weak self] in self?.hover.unpin() },
             onQuit: { NSApp.terminate(nil) }
         )

@@ -231,18 +231,67 @@ final class ClaudeTokenRefreshTests: XCTestCase {
 
         let state = await refresher.diagnosis()
         XCTAssertEqual(state, .expiredWithoutRefresh)
-        XCTAssertNotNil(ClaudeCredentialState.expiredWithoutRefresh.panelMessage)
+        XCTAssertTrue(
+            ClaudeCredentialState.expiredWithoutRefresh.panelMessage.contains("claude")
+        )
     }
 
-    /// A working credential has nothing to explain, so the panel shows numbers
-    /// rather than a notice.
-    func testValidCredentialHasNoPanelMessage() async {
+    /// A current credential with no windows means the call failed, not that the
+    /// sign-in is wrong — so it must not tell the user to sign in again.
+    func testValidCredentialReportsATransientFailure() async {
         let store = FakeStore(blob(expiresAt: now.addingTimeInterval(3_600)))
         let refresher = ClaudeTokenRefresher(store: store, post: { _ in nil }, now: { now })
 
         let state = await refresher.diagnosis()
         XCTAssertEqual(state, .valid)
-        XCTAssertNil(ClaudeCredentialState.valid.panelMessage)
+        XCTAssertFalse(ClaudeCredentialState.valid.panelMessage.contains("sign in again"))
+    }
+
+    /// A refused grant cannot be retried into working, so the panel must say so
+    /// instead of showing nothing. This is what left Claude silently absent.
+    func testARefusedRefreshIsReportedRatherThanLeavingABlank() async {
+        let store = FakeStore(blob(expiresAt: now.addingTimeInterval(-60)))
+        let refresher = ClaudeTokenRefresher(
+            store: store,
+            post: { _ in (Data(#"{"error":"invalid_grant"}"#.utf8), 400) },
+            now: { now }
+        )
+
+        _ = await refresher.token()
+        let state = await refresher.diagnosis()
+
+        XCTAssertEqual(state, .refreshRejected)
+        XCTAssertTrue(state.panelMessage.contains("sign in again"))
+    }
+
+    /// A network failure says nothing about the credential, so it must not tell
+    /// the user their sign-in expired.
+    func testANetworkFailureIsNotReportedAsAnExpiredSignIn() async {
+        let store = FakeStore(blob(expiresAt: now.addingTimeInterval(-60)))
+        let refresher = ClaudeTokenRefresher(store: store, post: { _ in nil }, now: { now })
+
+        _ = await refresher.token()
+        let state = await refresher.diagnosis()
+
+        XCTAssertEqual(state, .refreshable)
+        XCTAssertFalse(state.panelMessage.contains("sign in again"))
+    }
+
+    /// Signing in again writes a current credential, which must clear the
+    /// earlier rejection rather than leaving a stale warning on screen.
+    func testSigningInAgainClearsAPreviousRejection() async {
+        let store = FakeStore(blob(expiresAt: now.addingTimeInterval(-60)))
+        let refresher = ClaudeTokenRefresher(
+            store: store,
+            post: { _ in (Data(#"{"error":"invalid_grant"}"#.utf8), 400) },
+            now: { now }
+        )
+        _ = await refresher.token()
+
+        _ = store.save(blob(expiresAt: now.addingTimeInterval(3_600)))
+        let state = await refresher.diagnosis()
+
+        XCTAssertEqual(state, .valid)
     }
 
     /// A failed Keychain write must not be reported as success: the caller still
