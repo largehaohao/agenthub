@@ -66,6 +66,22 @@ out. This is the one credential AgentHub writes, and it writes it only where
 Claude Code already keeps it. If the refresh token is itself dead, the panel says
 so and `claude auth login` is the fix.
 
+## Why AgentHub reads your shell environment
+
+Codex is the only provider AgentHub shells out to. An app launched from Finder
+inherits launchd's environment, which is nearly empty — no `PATH` pointing at
+per-user CLI installs, and no proxy variables. That broke Codex twice: once
+because `codex` could not be found, once because it started but could not reach
+the network.
+
+So AgentHub asks your login shell what it exports (`$SHELL -ilc`, once per
+launch) and hands that to `codex`, giving it the same environment the command
+would have in your terminal. Nothing is stored, and the shell is only ever asked
+to print its environment.
+
+`URLSession` reads the system proxy configuration by itself, so the other three
+providers never needed this.
+
 ## Credentials
 
 Every provider token is read at the moment of the request, kept in memory for

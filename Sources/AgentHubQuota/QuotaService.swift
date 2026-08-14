@@ -115,7 +115,11 @@ public actor QuotaService {
                 fetch: { await claude.fetch() },
                 notice: { await claude.notice() }
             ),
-            .init(provider: .codex, fetch: { await codex.fetch() }),
+            .init(
+                provider: .codex,
+                fetch: { await codex.fetch() },
+                notice: { await codex.notice() }
+            ),
             // Cursor polls itself once authorised; this reads what it holds.
             .init(
                 provider: .cursor,

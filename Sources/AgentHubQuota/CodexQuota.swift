@@ -77,6 +77,19 @@ public struct CodexQuotaClient: Sendable {
         self.now = now
     }
 
+    /// Why Codex has no numbers, when it has none.
+    ///
+    /// Codex used to fail silently, which is how the same gap went unexplained
+    /// twice: once because `codex` was off the PATH, once because it could not
+    /// reach the network. Neither looked different from "no usage".
+    public func notice() async -> String? {
+        let environment = ProcessInfo.processInfo.environment
+            .merging(await LoginShellEnvironment.shared.values()) { _, shell in shell }
+        return CodexProcess.locate(environment: environment) == nil
+            ? "Codex CLI not found on this Mac"
+            : "Codex usage did not answer — check that `codex` works in a terminal"
+    }
+
     /// Returns no windows when Codex is absent or the call fails, so this one
     /// source degrades rather than the whole panel.
     public func fetch() async -> [QuotaWindow] {

@@ -3,11 +3,18 @@ import XCTest
 
 /// Guards the one provider that shells out.
 ///
-/// Codex is reached by spawning `codex app-server`, so unlike the other three
-/// it depends on where the binary is and what the child's `PATH` contains. An
-/// app launched from Finder inherits launchd's `PATH` — `/usr/bin:/bin` and
-/// nothing else — which held neither `codex` nor the `node` its shebang needs.
-/// The bug was invisible from a terminal, where the shell's `PATH` covers both.
+/// Codex is reached by spawning `codex app-server`, so unlike the other three it
+/// depends on the environment it is given. A Finder launch inherits launchd's,
+/// which is nearly empty, and that has broken Codex twice for different reasons:
+///
+///  - `PATH` held neither `codex` nor the `node` its shebang needs, so the
+///    process would not start.
+///  - No proxy variables, so `codex` started but could not reach the network and
+///    the call timed out. `URLSession` reads the system PAC file and the other
+///    three providers were unaffected, which made it look Codex-specific.
+///
+/// Both were invisible from a terminal, where the user's shell supplies all of
+/// it. The environment here is deliberately barer than a real Finder launch.
 ///
 /// Run with:
 /// ```
