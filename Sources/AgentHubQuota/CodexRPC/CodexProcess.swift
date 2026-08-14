@@ -38,7 +38,12 @@ public actor CodexProcess: LineTransport {
         let errors = Pipe()
         process.executableURL = executable
         process.arguments = ["app-server"]
-        process.environment = environment
+        // Codex ships as a Node script whose shebang is `/usr/bin/env node`, so
+        // finding codex is not enough — the child has to be able to find node
+        // too, and launchd's PATH cannot.
+        var childEnvironment = environment
+        childEnvironment["PATH"] = Self.searchPath(environment).joined(separator: ":")
+        process.environment = childEnvironment
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors
@@ -136,14 +141,45 @@ public actor CodexProcess: LineTransport {
             return explicit
         }
 
-        for directory in environment["PATH", default: ""].split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(directory), isDirectory: true)
+        for directory in searchPath(environment) {
+            let candidate = URL(fileURLWithPath: directory, isDirectory: true)
                 .appendingPathComponent("codex")
             if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate
             }
         }
         throw CodexRPCError.executableNotFound
+    }
+
+    /// Where CLI tools are installed, beyond whatever `PATH` we inherited.
+    ///
+    /// An app launched from Finder or Spotlight inherits launchd's `PATH`,
+    /// which is just `/usr/bin:/bin:/usr/sbin:/sbin` unless the user has set
+    /// one — none of the places a per-user CLI installs itself. Relying on the
+    /// inherited value alone meant Codex worked when the app was started from a
+    /// terminal and silently reported nothing otherwise.
+    static let toolDirectories = [
+        ".local/bin",
+        ".bun/bin",
+        ".cargo/bin",
+        ".codex/bin",
+        ".volta/bin",
+    ]
+
+    static func searchPath(_ environment: [String: String]) -> [String] {
+        let inherited = environment["PATH", default: ""]
+            .split(separator: ":")
+            .map(String.init)
+        let home = environment["HOME"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let wellKnown = toolDirectories.map {
+            home.appendingPathComponent($0).path
+        } + ["/opt/homebrew/bin", "/usr/local/bin"]
+
+        // The inherited entries come first: a user who has put a particular
+        // codex on their PATH means that one.
+        var seen = Set<String>()
+        return (inherited + wellKnown).filter { seen.insert($0).inserted }
     }
 
     private func consumeOutput(_ data: Data) {
