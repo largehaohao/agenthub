@@ -49,6 +49,26 @@ struct QuotaPresentation: Identifiable, Equatable {
     /// 39.35333333333333, which must not reach the strip verbatim.
     var displayPercent: String { "\(Int(usedPercent.rounded()))%" }
 
+    /// How close this window is to running out.
+    ///
+    /// The panel's one job is answering "am I about to hit a limit", and a dozen
+    /// equally-weighted numbers make that a manual comparison. Only the windows
+    /// worth worrying about take colour, so the eye lands on them and the rest
+    /// stays quiet.
+    enum Pressure {
+        case comfortable
+        case tight
+        case critical
+    }
+
+    var pressure: Pressure {
+        switch usedPercent {
+        case ..<75: .comfortable
+        case ..<90: .tight
+        default: .critical
+        }
+    }
+
     static func durationLabel(_ duration: TimeInterval) -> String {
         QuotaWindow.durationLabel(duration)
     }

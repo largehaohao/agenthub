@@ -221,3 +221,40 @@ final class QuotaPresentationTests: XCTestCase {
         XCTAssertFalse(item.isStale)
     }
 }
+
+@MainActor
+final class QuotaPressureTests: XCTestCase {
+    private func presentation(_ percent: Double, resetsIn: TimeInterval = 3_600) throws -> QuotaPresentation {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        return QuotaPresentation(
+            window: try QuotaWindow(
+                provider: .claude,
+                accountID: "a",
+                usedPercent: percent,
+                windowDuration: 3_600,
+                resetsAt: now.addingTimeInterval(resetsIn),
+                fetchedAt: now,
+                source: "test"
+            ),
+            now: now
+        )
+    }
+
+    /// Colour is only spent where it means something, so most windows must stay
+    /// quiet — a panel where everything is coloured highlights nothing.
+    func testRoomToSpareIsNotHighlighted() throws {
+        XCTAssertEqual(try presentation(0).pressure, .comfortable)
+        XCTAssertEqual(try presentation(50).pressure, .comfortable)
+        XCTAssertEqual(try presentation(74.9).pressure, .comfortable)
+    }
+
+    func testApproachingTheLimitIsFlagged() throws {
+        XCTAssertEqual(try presentation(75).pressure, .tight)
+        XCTAssertEqual(try presentation(89.9).pressure, .tight)
+    }
+
+    func testNearlyExhaustedIsUrgent() throws {
+        XCTAssertEqual(try presentation(90).pressure, .critical)
+        XCTAssertEqual(try presentation(100).pressure, .critical)
+    }
+}

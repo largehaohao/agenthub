@@ -100,6 +100,7 @@ struct QuotaPanelView: View {
         HStack(spacing: 6) {
             PanelButton(symbol: "minus", help: "Smaller") { model.shrink() }
                 .disabled(!model.canShrink)
+                .foregroundStyle(.secondary)
             Text("\(Int((scale * 100).rounded()))%")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -108,6 +109,7 @@ struct QuotaPanelView: View {
                 .frame(width: 34)
             PanelButton(symbol: "plus", help: "Larger") { model.enlarge() }
                 .disabled(!model.canEnlarge)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -119,7 +121,7 @@ struct QuotaPanelView: View {
             Button("Quit AgentHub", action: onQuit)
                 .buttonStyle(.borderless)
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
         }
     }
 }
@@ -195,6 +197,18 @@ private struct QuotaFigure: View {
     let bar: Double
     let percent: Double
 
+    /// Colour is spent only where it means something. A window with room to
+    /// spare stays in the ordinary text colour, so the ones that do take colour
+    /// are the ones worth looking at.
+    private var figureColor: Color {
+        guard !window.hasElapsed else { return .secondary }
+        switch window.pressure {
+        case .comfortable: return .primary
+        case .tight: return .orange
+        case .critical: return .red
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5 * scale) {
             HStack(spacing: 5 * scale) {
@@ -215,9 +229,9 @@ private struct QuotaFigure: View {
             Text(window.displayPercent)
                 .font(.system(size: percent * scale, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(window.hasElapsed ? Color.secondary : .primary)
+                .foregroundStyle(figureColor)
             ProgressView(value: window.usedPercent, total: 100)
-                .tint(window.hasElapsed ? .gray : tint)
+                .tint(window.hasElapsed ? .gray : (window.pressure == .comfortable ? tint : figureColor))
                 .frame(width: bar * scale)
             // An elapsed window's reset time is in the past, so a countdown
             // would read as one that already fired.
@@ -229,6 +243,9 @@ private struct QuotaFigure: View {
                 .lineLimit(1)
                 .fixedSize()
         }
+        // A fixed column so windows line up down the panel instead of shifting
+        // with the width of each label.
+        .frame(width: bar * scale, alignment: .leading)
     }
 }
 

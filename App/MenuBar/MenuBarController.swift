@@ -17,6 +17,7 @@ final class MenuBarController: NSObject {
     /// under the menu bar.
     private var anchor: NSPoint?
     private var contentObserver: AnyCancellable?
+    private var clickAwayMonitor: Any?
     private lazy var hover = HoverController(schedule: Self.schedule)
 
     init(model: QuotaPanelModel, onOpenSettings: @escaping () -> Void) {
@@ -30,6 +31,9 @@ final class MenuBarController: NSObject {
         item.button?.image = Self.menuBarImage()
         item.button?.target = self
         item.button?.action = #selector(statusItemClicked)
+        // Right-click is where macOS users look for an app's own commands, and
+        // it works whether or not the panel is open.
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
 
         if let button = item.button {
@@ -44,7 +48,9 @@ final class MenuBarController: NSObject {
         }
 
         hover.onVisibilityChange = { [weak self] visible in
-            visible ? self?.showPanel() : self?.hidePanel()
+            guard let self else { return }
+            visible ? self.showPanel() : self.hidePanel()
+            self.watchForClickAway(visible)
         }
     }
 
@@ -87,9 +93,42 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showMenu()
+            return
+        }
         // Clicking the icon and pressing the shortcut are the same gesture, so
         // they behave identically — including the refresh.
         togglePinned()
+    }
+
+    private func showMenu() {
+        hover.unpin()
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Refresh Usage", action: #selector(refreshFromMenu), keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit AgentHub", action: #selector(quitFromMenu), keyEquivalent: "q")
+        for item in menu.items where item.action != nil { item.target = self }
+
+        // Attaching the menu makes the next click open it; detaching afterwards
+        // restores the plain click-to-toggle behaviour.
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func refreshFromMenu() {
+        Task { await model.load(force: true) }
+    }
+
+    @objc private func openSettingsFromMenu() {
+        onOpenSettings()
+    }
+
+    @objc private func quitFromMenu() {
+        NSApp.terminate(nil)
     }
 
     private func showPanel() {
@@ -102,6 +141,25 @@ final class MenuBarController: NSObject {
 
     private func hidePanel() {
         panel?.orderOut(nil)
+    }
+
+    /// Dismisses the panel when the user clicks anywhere else.
+    ///
+    /// A glance panel that stays up after you have moved on is clutter, and
+    /// clicking away is what every other menu bar app does. Clicks inside our
+    /// own windows are local events, so this only ever sees clicks elsewhere.
+    private func watchForClickAway(_ watching: Bool) {
+        guard watching != (clickAwayMonitor != nil) else { return }
+        if watching {
+            clickAwayMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown]
+            ) { [weak self] _ in
+                self?.hover.unpin()
+            }
+        } else if let clickAwayMonitor {
+            NSEvent.removeMonitor(clickAwayMonitor)
+            self.clickAwayMonitor = nil
+        }
     }
 
     /// Grows or shrinks the panel to match its contents.
