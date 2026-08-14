@@ -9,7 +9,8 @@ struct AgentHubApp: App {
         Settings {
             SettingsView(
                 cursor: delegate.cursorAuthorization,
-                hotKey: delegate.hotKeyModel
+                hotKey: delegate.hotKeyModel,
+                providers: delegate.providerVisibility
             )
         }
     }
@@ -21,8 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let cursorAuthorization = CursorAuthorizationModel()
     let hotKeyModel = HotKeyModel()
+    let providerVisibility = ProviderVisibility()
 
-    private lazy var model = QuotaPanelModel(service: QuotaService.live())
+    private lazy var model = QuotaPanelModel(
+        service: QuotaService.live(shown: providerVisibility.shown)
+    )
     private lazy var menuBar = MenuBarController(model: model) {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -39,6 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menuBar.install()
+
+        let service = model.service
+        providerVisibility.onChange = { [weak self] shown in
+            Task {
+                await service.show(shown)
+                await self?.model.load(force: true)
+            }
+        }
 
         bind(hotKeyModel.binding)
         hotKeyModel.onChange = { [weak self] binding in

@@ -19,6 +19,10 @@ the whole panel, from 80% to 250%, and the size is remembered.
 
 A provider that reports nothing says why instead of leaving a gap.
 
+Settings chooses which providers appear. A hidden one is not merely left out of
+the panel — it is never contacted, so hiding Codex stops spawning a subprocess
+and hiding Cursor stops calling `cursor.com`.
+
 ## What it does not do
 
 AgentHub used to manage agent sessions — listing them, approving permission

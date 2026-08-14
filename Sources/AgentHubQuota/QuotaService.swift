@@ -42,6 +42,11 @@ public actor QuotaService {
     private let minimumInterval: TimeInterval
     private let now: @Sendable () -> Date
 
+    /// Providers the user wants to see. A hidden provider is not merely left out
+    /// of the panel: it is never fetched, so hiding Codex stops spawning a
+    /// subprocess and hiding Cursor stops calling cursor.com.
+    private var shown: Set<Provider>
+
     private var cached: [Provider: [QuotaWindow]] = [:]
     private var notices: [Provider: String] = [:]
     /// Tracked per provider: one slow or failing source must not hold the
@@ -51,18 +56,31 @@ public actor QuotaService {
     public init(
         sources: [QuotaSource],
         minimumInterval: TimeInterval = QuotaService.defaultInterval,
+        shown: Set<Provider> = Set(Provider.allCases),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.sources = sources
         self.minimumInterval = minimumInterval
+        self.shown = shown
         self.now = now
+    }
+
+    /// Chooses which providers appear. Defaults to all of them.
+    public func show(_ providers: Set<Provider>) {
+        shown = providers
+    }
+
+    public func shownProviders() -> Set<Provider> {
+        shown
     }
 
     /// - Parameter force: bypasses the interval for an explicit user refresh,
     ///   so the refresh button is never a no-op.
     public func windows(force: Bool = false) async -> [QuotaWindow] {
         let now = self.now()
-        let due = sources.filter { force || isDue($0.provider, now: now) }
+        let due = sources
+            .filter { shown.contains($0.provider) }
+            .filter { force || isDue($0.provider, now: now) }
         guard !due.isEmpty else { return flattened() }
         for source in due { lastAttempt[source.provider] = now }
 
@@ -87,8 +105,9 @@ public actor QuotaService {
     /// Explanations gathered by the last refresh, keyed by provider.
     public func currentNotices() -> [Provider: String] {
         // A provider holding a previous reading is showing numbers, so any
-        // explanation would contradict what is on screen.
-        notices.filter { cached[$0.key]?.isEmpty ?? true }
+        // explanation would contradict what is on screen. A hidden one owes no
+        // explanation at all — the user chose not to see it.
+        notices.filter { shown.contains($0.key) && (cached[$0.key]?.isEmpty ?? true) }
     }
 
     private func isDue(_ provider: Provider, now: Date) -> Bool {
@@ -99,12 +118,21 @@ public actor QuotaService {
         return now.timeIntervalSince(last) >= interval
     }
 
+    /// Readings for shown providers only. A hidden provider keeps whatever it
+    /// last reported, so re-showing it has something on screen until the next
+    /// refresh lands.
     private func flattened() -> [QuotaWindow] {
-        cached.values.flatMap { $0 }
+        cached
+            .filter { shown.contains($0.key) }
+            .values
+            .flatMap { $0 }
     }
 
     /// The four real providers, wired to this Mac.
-    public static func live() -> QuotaService {
+    ///
+    /// - Parameter shown: providers to report. Passed in at construction rather
+    ///   than set afterwards, so a hidden provider is never contacted even once.
+    public static func live(shown: Set<Provider> = Set(Provider.allCases)) -> QuotaService {
         let claude = ClaudeUsageAPIClient()
         let codex = CodexQuotaClient()
         let cursor = CursorQuotaCollector.live()
@@ -135,6 +163,6 @@ public actor QuotaService {
                 }
             ),
             .init(provider: .openCode, fetch: { await openCode.fetch() }),
-        ])
+        ], shown: shown)
     }
 }

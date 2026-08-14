@@ -29,7 +29,11 @@ struct QuotaPanelView: View {
             header
 
             if model.rows.isEmpty && model.notices.isEmpty {
-                Text("No usage reported yet")
+                // Hiding every provider is a choice, not a failure, so it must
+                // not read like one.
+                Text(model.showsNoProviders
+                     ? "No providers selected — choose some in Settings"
+                     : "No usage reported yet")
                     .font(.system(size: 13 * scale))
                     .foregroundStyle(.secondary)
             } else {
