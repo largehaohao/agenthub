@@ -107,6 +107,14 @@ final class MenuBarController: NSObject {
         guard size.width > 0, size.height > 0, size != panel.contentLayoutRect.size else {
             return
         }
+
+        // Zooming past the screen would put the close button out of reach, so
+        // the last step that no longer fits is given back.
+        if let screen = panelScreen(), size.height > screen.visibleFrame.height - 16 {
+            model.refuseEnlargement()
+            return
+        }
+
         panel.setContentSize(size)
         reanchor(recentre: false)
     }
@@ -128,11 +136,27 @@ final class MenuBarController: NSObject {
         )
         // A panel zoomed wide under a status item near the right edge would
         // otherwise hang off the screen.
-        if let visible = window.screen?.visibleFrame {
-            point.x = min(max(point.x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
+        if let visible = panelScreen()?.visibleFrame {
+            let rightmost = visible.maxX - panel.frame.width - 8
+            point.x = min(max(point.x, visible.minX + 8), max(rightmost, visible.minX + 8))
         }
         anchor = point
         panel.setFrameTopLeftPoint(point)
+    }
+
+    /// The display the status item is on.
+    ///
+    /// Not `button.window?.screen`: with more than one display that reports the
+    /// screen holding the active menu bar, which is not necessarily this one,
+    /// and clamping against the wrong bounds let the panel run off the edge.
+    private func panelScreen() -> NSScreen? {
+        guard let button = statusItem?.button, let window = button.window else {
+            return NSScreen.main
+        }
+        let buttonFrame = window.convertToScreen(button.frame)
+        return NSScreen.screens.first { $0.frame.intersects(buttonFrame) }
+            ?? window.screen
+            ?? NSScreen.main
     }
 
     private func makePanel() -> NSPanel {

@@ -40,6 +40,34 @@ final class QuotaPanelModelTests: XCTestCase {
         XCTAssertFalse(model.canShrink)
     }
 
+    /// A zoom step that does not fit the screen is given back, and not offered
+    /// again until the panel shrinks.
+    func testRefusedEnlargementIsGivenBackAndNotOfferedAgain() throws {
+        let model = makeModel(try makeDefaults(#function))
+        model.enlarge()
+        model.enlarge()
+        let overflowing = model.scale
+
+        model.refuseEnlargement()
+
+        XCTAssertEqual(model.scale, overflowing - QuotaPanelModel.scaleStep, accuracy: 0.0001)
+        XCTAssertFalse(model.canEnlarge)
+        model.enlarge()
+        XCTAssertEqual(model.scale, overflowing - QuotaPanelModel.scaleStep, accuracy: 0.0001)
+    }
+
+    /// Shrinking makes room again, so the discovered ceiling has to lift.
+    func testShrinkingLiftsTheCeiling() throws {
+        let model = makeModel(try makeDefaults(#function))
+        model.enlarge()
+        model.refuseEnlargement()
+        XCTAssertFalse(model.canEnlarge)
+
+        model.shrink()
+
+        XCTAssertTrue(model.canEnlarge)
+    }
+
     func testScaleSurvivesRelaunch() throws {
         let defaults = try makeDefaults(#function)
         let model = makeModel(defaults)

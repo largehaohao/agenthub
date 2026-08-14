@@ -45,11 +45,35 @@ final class QuotaPanelModel: ObservableObject {
         notices = await service.currentNotices()
     }
 
-    var canEnlarge: Bool { scale < Self.scaleRange.upperBound - 0.001 }
+    /// The largest scale that still fits the screen, once one has been found.
+    ///
+    /// Discovered rather than calculated: how tall the panel gets depends on how
+    /// many windows the providers happen to report, which changes.
+    private var ceiling = QuotaPanelModel.scaleRange.upperBound
+
+    var canEnlarge: Bool { scale < min(Self.scaleRange.upperBound, ceiling) - 0.001 }
     var canShrink: Bool { scale > Self.scaleRange.lowerBound + 0.001 }
 
-    func enlarge() { setScale(scale + Self.scaleStep) }
-    func shrink() { setScale(scale - Self.scaleStep) }
+    /// Enforces the ceiling here rather than leaving it to the button's disabled
+    /// state, so the shortcut and any other caller obey it too.
+    func enlarge() { setScale(min(scale + Self.scaleStep, ceiling)) }
+
+    func shrink() {
+        // Shrinking makes room again, so a ceiling found earlier no longer
+        // applies — a provider may also have stopped reporting since.
+        ceiling = Self.scaleRange.upperBound
+        setScale(scale - Self.scaleStep)
+    }
+
+    /// Gives back a zoom step that turned out not to fit on screen, and refuses
+    /// to offer it again until the panel shrinks.
+    func refuseEnlargement() {
+        setScale(scale - Self.scaleStep)
+        // The ceiling is the step that fits, not the one that did not: setting
+        // it to the rejected value would offer the same step straight back and
+        // leave the button toggling between two sizes.
+        ceiling = scale
+    }
 
     private func setScale(_ value: Double) {
         scale = min(max(value, Self.scaleRange.lowerBound), Self.scaleRange.upperBound)
