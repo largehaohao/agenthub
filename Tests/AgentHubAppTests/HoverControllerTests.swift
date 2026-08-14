@@ -99,6 +99,49 @@ final class HoverControllerTests: XCTestCase {
         XCTAssertTrue(controller.isVisible)
     }
 
+    /// The shortcut is a toggle: the same keys that opened the panel close it.
+    func testTogglingPinsThenUnpins() {
+        let scheduler = ManualScheduler()
+        let controller = HoverController(delay: 0.3, schedule: { scheduler.schedule($0, $1) })
+
+        controller.togglePinned()
+        XCTAssertTrue(controller.isVisible)
+        XCTAssertTrue(controller.isPinned)
+
+        controller.togglePinned()
+        XCTAssertFalse(controller.isVisible)
+        XCTAssertFalse(controller.isPinned)
+    }
+
+    /// A panel already open from hover is pinned rather than dismissed: the
+    /// shortcut's job is to make it stay, and closing what the pointer just
+    /// opened would read as the shortcut doing nothing.
+    func testTogglingAHoveredPanelPinsIt() {
+        let scheduler = ManualScheduler()
+        let controller = HoverController(delay: 0.3, schedule: { scheduler.schedule($0, $1) })
+        controller.mouseEntered()
+        scheduler.fireAll()
+
+        controller.togglePinned()
+
+        XCTAssertTrue(controller.isPinned)
+        XCTAssertTrue(controller.isVisible)
+    }
+
+    /// Toggling closed while the pointer sits on the icon must not leave a
+    /// pending show that reopens the panel a moment later.
+    func testTogglingClosedDiscardsAPendingHover() {
+        let scheduler = ManualScheduler()
+        let controller = HoverController(delay: 0.3, schedule: { scheduler.schedule($0, $1) })
+        controller.togglePinned()
+
+        controller.mouseEntered()
+        controller.togglePinned()
+        scheduler.fireAll()
+
+        XCTAssertFalse(controller.isVisible)
+    }
+
     func testVisibilityChangesAreReportedOnce() {
         let scheduler = ManualScheduler()
         let controller = HoverController(delay: 0.3, schedule: { scheduler.schedule($0, $1) })

@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func bind(_ binding: HotKeyBinding) {
         hotKey.register(binding) { [weak self] in
-            self?.menuBar.revealPinned()
+            self?.menuBar.togglePinned()
         }
     }
 

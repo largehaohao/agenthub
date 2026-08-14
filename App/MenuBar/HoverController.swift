@@ -62,7 +62,20 @@ final class HoverController {
     }
 
     func unpin() {
+        // A hover scheduled just before this would otherwise reopen the panel a
+        // moment after it was dismissed.
+        pendingShow?.cancel()
+        pendingShow = nil
         isPinned = false
         isVisible = false
+    }
+
+    /// Pins the panel, or dismisses it if it is already pinned.
+    ///
+    /// A panel open from hover but not yet pinned is pinned rather than
+    /// dismissed: making it stay is the point, and closing what the pointer just
+    /// opened would read as the shortcut doing nothing.
+    func togglePinned() {
+        isPinned ? unpin() : pin()
     }
 }

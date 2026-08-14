@@ -61,9 +61,10 @@ final class MenuBarController: NSObject {
         )!
     }
 
-    /// Shows the panel pinned, for the global shortcut.
-    func revealPinned() {
-        hover.pin()
+    /// Opens the panel pinned, or closes it if the shortcut is pressed again.
+    func togglePinned() {
+        hover.togglePinned()
+        guard hover.isPinned else { return }
         // The shortcut is the one way in that skips the tracking area, so
         // without this it shows whatever the last hover or the startup refresh
         // left behind. The service's own interval decides whether this calls
@@ -86,7 +87,9 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func statusItemClicked() {
-        hover.isPinned ? hover.unpin() : hover.pin()
+        // Clicking the icon and pressing the shortcut are the same gesture, so
+        // they behave identically — including the refresh.
+        togglePinned()
     }
 
     private func showPanel() {
