@@ -2,13 +2,13 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var cursor: CursorAuthorizationModel
-    private let binding = HotKeyBinding.load()
+    @ObservedObject var hotKey: HotKeyModel
 
     var body: some View {
         Form {
             Section("Shortcut") {
                 LabeledContent("Show usage") {
-                    Text(binding.displayName).monospaced()
+                    HotKeyRecorder(model: hotKey)
                 }
                 Text("Press this anywhere to open the usage panel.")
                     .font(.caption)

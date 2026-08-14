@@ -7,14 +7,17 @@ It reads usage for four providers and shows them in one place:
 
 | Provider | Windows | Source |
 |---|---|---|
-| Claude | 5h, 7d | Anthropic's usage endpoint, via the OAuth token Claude Code stores in the login Keychain |
+| Claude | 5h, 7d | Anthropic's usage endpoint, via the OAuth token Claude Code stores |
 | Codex | 5h, 7d | a short-lived `codex app-server` |
 | Cursor | billing cycle, split API / Auto / Total | `cursor.com` usage summary, after you authorise it |
 | OpenCode | 5h, 7d, 30d | `opencode.ai` Go usage, via the key the CLI stores |
 
-Hover the menu bar icon to see them, click to pin the panel, or press ⌥⌘U from
-anywhere. Usage refreshes every fifteen minutes, and the pinned panel has a
-refresh button.
+Hover the menu bar icon to see them, click to pin the panel, or press ⇧⌘T from
+anywhere — the shortcut is rebindable in Settings. Usage refreshes every fifteen
+minutes, and the pinned panel has a refresh button. The `−` and `+` buttons zoom
+the whole panel, from 80% to 250%, and the size is remembered.
+
+A provider that reports nothing says why instead of leaving a gap.
 
 ## What it does not do
 
@@ -47,14 +50,21 @@ On first launch it removes what older versions installed: the
 wrapper, and AgentHub's Cursor hooks. Hooks belonging to other tools are left
 alone, and both files are backed up first.
 
-Two providers need a one-time approval before they report:
+**Cursor** is opt-in: until you authorise it in Settings, AgentHub does not read
+the session token Cursor stores on this Mac.
 
-- **Claude** reads the OAuth token Claude Code keeps in your login Keychain.
-  macOS asks you to allow that the first time, so expect a Keychain dialog;
-  choose "Always Allow" if you would rather not see it again. Until then the
-  Claude row is simply absent.
-- **Cursor** is opt-in. Until you authorise it in Settings, AgentHub does not
-  read the session token Cursor stores on this Mac.
+**Claude** works as long as Claude Code is signed in. Claude Code keeps its
+credential in `~/.claude/.credentials.json` or in the login Keychain, and a Mac
+can hold both — one of them a dead leftover from an older sign-in — so AgentHub
+reads whichever has the later expiry rather than preferring either.
+
+Claude's access token lasts eight hours and Claude Code only renews it when it
+makes a request, so a Mac that has not run it since this morning holds an expired
+one. AgentHub then performs the same refresh Claude Code performs and writes the
+result back to the same store, so a rotated refresh token does not log the CLI
+out. This is the one credential AgentHub writes, and it writes it only where
+Claude Code already keeps it. If the refresh token is itself dead, the panel says
+so and `claude auth login` is the fix.
 
 ## Credentials
 

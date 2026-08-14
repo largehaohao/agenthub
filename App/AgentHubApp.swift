@@ -7,7 +7,10 @@ struct AgentHubApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(cursor: delegate.cursorAuthorization)
+            SettingsView(
+                cursor: delegate.cursorAuthorization,
+                hotKey: delegate.hotKeyModel
+            )
         }
     }
 }
@@ -17,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let uninstallKey = "legacyUninstallCompleted"
 
     let cursorAuthorization = CursorAuthorizationModel()
+    let hotKeyModel = HotKeyModel()
 
     private lazy var model = QuotaPanelModel(service: QuotaService.live())
     private lazy var menuBar = MenuBarController(model: model) {
@@ -36,8 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar.install()
 
-        hotKey.register(HotKeyBinding.load()) { [weak self] in
-            self?.menuBar.revealPinned()
+        bind(hotKeyModel.binding)
+        hotKeyModel.onChange = { [weak self] binding in
+            self?.bind(binding)
         }
 
         refreshTask = Task { [model] in
@@ -45,6 +50,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await model.load(force: false)
                 try? await Task.sleep(for: .seconds(QuotaService.defaultInterval))
             }
+        }
+    }
+
+    private func bind(_ binding: HotKeyBinding) {
+        hotKey.register(binding) { [weak self] in
+            self?.menuBar.revealPinned()
         }
     }
 
