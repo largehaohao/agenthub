@@ -14,12 +14,18 @@ public actor CodexProcess: LineTransport {
     private var diagnosticLines: [String] = []
     private var finished = false
 
+    private let loginShellEnvironment: @Sendable () async -> [String: String]
+
     public init(
         executableURL: URL? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        loginShellEnvironment: @escaping @Sendable () async -> [String: String] = {
+            await LoginShellEnvironment.shared.values()
+        }
     ) {
         explicitExecutableURL = executableURL
         self.environment = environment
+        self.loginShellEnvironment = loginShellEnvironment
         let pair = AsyncThrowingStream<Data, Error>.makeStream()
         lineStream = pair.stream
         lineContinuation = pair.continuation
@@ -27,9 +33,16 @@ public actor CodexProcess: LineTransport {
 
     public func start() async throws {
         guard process == nil else { throw CodexRPCError.alreadyStarted }
+
+        // What the user's terminal would give the same command. Without it a
+        // Finder launch cannot find codex, and codex cannot reach the network
+        // through a proxy configured in the shell.
+        let effectiveEnvironment = environment
+            .merging(await loginShellEnvironment()) { _, shell in shell }
+
         let executable = try Self.resolveExecutable(
             explicit: explicitExecutableURL,
-            environment: environment
+            environment: effectiveEnvironment
         )
 
         let process = Process()
@@ -41,8 +54,8 @@ public actor CodexProcess: LineTransport {
         // Codex ships as a Node script whose shebang is `/usr/bin/env node`, so
         // finding codex is not enough — the child has to be able to find node
         // too, and launchd's PATH cannot.
-        var childEnvironment = environment
-        childEnvironment["PATH"] = Self.searchPath(environment).joined(separator: ":")
+        var childEnvironment = effectiveEnvironment
+        childEnvironment["PATH"] = Self.searchPath(effectiveEnvironment).joined(separator: ":")
         process.environment = childEnvironment
         process.standardInput = input
         process.standardOutput = output
@@ -125,6 +138,16 @@ public actor CodexProcess: LineTransport {
             with: "$1[REDACTED]$2"
         )
         return value
+    }
+
+    /// Where `codex` is, or nil when it cannot be found.
+    ///
+    /// Exposed so the panel can tell "Codex is not installed" apart from "the
+    /// call failed", rather than showing the same blank either way.
+    public static func locate(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        try? resolveExecutable(explicit: nil, environment: environment)
     }
 
     private static func resolveExecutable(

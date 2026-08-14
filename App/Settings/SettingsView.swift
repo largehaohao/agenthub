@@ -1,11 +1,25 @@
 import SwiftUI
+import AgentHubQuota
 
 struct SettingsView: View {
     @ObservedObject var cursor: CursorAuthorizationModel
     @ObservedObject var hotKey: HotKeyModel
+    @ObservedObject var providers: ProviderVisibility
 
     var body: some View {
         Form {
+            Section("Providers") {
+                ForEach(providers.allProviders, id: \.self) { provider in
+                    Toggle(provider.displayName, isOn: Binding(
+                        get: { providers.isShown(provider) },
+                        set: { providers.setShown(provider, $0) }
+                    ))
+                }
+                Text("Hidden providers are not shown and not contacted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Shortcut") {
                 LabeledContent("Show usage") {
                     HotKeyRecorder(model: hotKey)

@@ -138,6 +138,73 @@ final class QuotaServiceTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    /// Hiding a provider must stop it being contacted, not merely hide the
+    /// result: hiding Codex should stop spawning a subprocess and hiding Cursor
+    /// should stop calling cursor.com.
+    func testHiddenProvidersAreNeverFetched() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let hidden = Counter()
+        let shown = Counter()
+        let codex = try window(.codex, 20, at: now)
+        let service = QuotaService(
+            sources: [
+                .init(provider: .claude) {
+                    await hidden.increment()
+                    return []
+                },
+                .init(provider: .codex) {
+                    await shown.increment()
+                    return [codex]
+                },
+            ],
+            shown: [.codex],
+            now: { now }
+        )
+
+        let windows = await service.windows()
+
+        let hiddenCalls = await hidden.count
+        let shownCalls = await shown.count
+        XCTAssertEqual(hiddenCalls, 0)
+        XCTAssertEqual(shownCalls, 1)
+        XCTAssertEqual(windows.map(\.provider), [.codex])
+    }
+
+    /// A hidden provider owes no explanation — the user chose not to see it.
+    func testHiddenProvidersProduceNoNotice() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let service = QuotaService(
+            sources: [.init(provider: .claude, fetch: { [] }, notice: { "signed out" })],
+            shown: [],
+            now: { now }
+        )
+
+        _ = await service.windows()
+
+        let notices = await service.currentNotices()
+        XCTAssertTrue(notices.isEmpty)
+    }
+
+    /// Re-showing a provider brings back what it last reported, so the panel is
+    /// not blank until the next refresh lands.
+    func testReshowingAProviderRestoresItsLastReading() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let claude = try window(.claude, 10, at: now)
+        let service = QuotaService(
+            sources: [.init(provider: .claude) { [claude] }],
+            now: { now }
+        )
+        _ = await service.windows()
+
+        await service.show([])
+        let whileHidden = await service.windows()
+        await service.show([.claude])
+        let afterShowing = await service.windows()
+
+        XCTAssertTrue(whileHidden.isEmpty)
+        XCTAssertEqual(afterShowing.map(\.usedPercent), [10])
+    }
+
     /// A transient failure must leave the last real numbers on screen rather
     /// than blanking the panel.
     func testFailedRefreshKeepsPreviousWindows() async throws {

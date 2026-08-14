@@ -19,6 +19,10 @@ the whole panel, from 80% to 250%, and the size is remembered.
 
 A provider that reports nothing says why instead of leaving a gap.
 
+Settings chooses which providers appear. A hidden one is not merely left out of
+the panel — it is never contacted, so hiding Codex stops spawning a subprocess
+and hiding Cursor stops calling `cursor.com`.
+
 ## What it does not do
 
 AgentHub used to manage agent sessions — listing them, approving permission
@@ -65,6 +69,22 @@ result back to the same store, so a rotated refresh token does not log the CLI
 out. This is the one credential AgentHub writes, and it writes it only where
 Claude Code already keeps it. If the refresh token is itself dead, the panel says
 so and `claude auth login` is the fix.
+
+## Why AgentHub reads your shell environment
+
+Codex is the only provider AgentHub shells out to. An app launched from Finder
+inherits launchd's environment, which is nearly empty — no `PATH` pointing at
+per-user CLI installs, and no proxy variables. That broke Codex twice: once
+because `codex` could not be found, once because it started but could not reach
+the network.
+
+So AgentHub asks your login shell what it exports (`$SHELL -ilc`, once per
+launch) and hands that to `codex`, giving it the same environment the command
+would have in your terminal. Nothing is stored, and the shell is only ever asked
+to print its environment.
+
+`URLSession` reads the system proxy configuration by itself, so the other three
+providers never needed this.
 
 ## Credentials
 

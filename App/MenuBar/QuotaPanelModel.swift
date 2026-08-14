@@ -20,7 +20,7 @@ final class QuotaPanelModel: ObservableObject {
     static let scaleStep = 0.15
     private static let scaleKey = "panelScale"
 
-    private let service: QuotaService
+    let service: QuotaService
     private let defaults: UserDefaults
     private let now: @Sendable () -> Date
 
@@ -37,12 +37,16 @@ final class QuotaPanelModel: ObservableObject {
         self.scale = Self.scaleRange.contains(stored) ? stored : 1.0
     }
 
+    /// Every provider is hidden, so an empty panel is the user's own doing.
+    @Published private(set) var showsNoProviders = false
+
     func load(force: Bool) async {
         isRefreshing = true
         defer { isRefreshing = false }
         let windows = await service.windows(force: force)
         rows = QuotaProviderRow.rows(from: windows, now: now())
         notices = await service.currentNotices()
+        showsNoProviders = await service.shownProviders().isEmpty
     }
 
     /// The largest scale that still fits the screen, once one has been found.
